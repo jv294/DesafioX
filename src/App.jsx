@@ -1,10 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import QRCode from 'react-qr-code'
 import './App.css'
 
 function App() {
-  const [currentView, setCurrentView] = useState('login')
-  const [currentUser, setCurrentUser] = useState(null)
+  const [currentUser, setCurrentUser] = useState(() => {
+    const loggedInUser = localStorage.getItem('currentUser')
+    return loggedInUser ? JSON.parse(loggedInUser) : null
+  })
+  const [currentView, setCurrentView] = useState(() => {
+    const loggedInUser = localStorage.getItem('currentUser')
+    return loggedInUser ? 'dashboard' : 'login'
+  })
   const [users, setUsers] = useState([])
   
   // Toast notifications state
@@ -17,7 +23,17 @@ function App() {
   const [postMediaType, setPostMediaType] = useState('')
   const [taggedUsers, setTaggedUsers] = useState([])
 
-  const addToast = (message, type = 'info') => {
+  // Reply states
+  const [activeReplyId, setActiveReplyId] = useState(null)
+  const [replyText, setReplyText] = useState('')
+  const [replyMedia, setReplyMedia] = useState(null)
+  const [replyMediaType, setReplyMediaType] = useState('')
+
+  const removeToast = useCallback((id) => {
+    setToasts(prev => prev.filter(toast => toast.id !== id))
+  }, [])
+
+  const addToast = useCallback((message, type = 'info') => {
     const id = Date.now()
     setToasts(prev => [...prev, { id, message, type }])
     
@@ -25,20 +41,10 @@ function App() {
     setTimeout(() => {
       removeToast(id)
     }, 4000)
-  }
-
-  const removeToast = (id) => {
-    setToasts(prev => prev.filter(toast => toast.id !== id))
-  }
+  }, [removeToast])
 
   // Load data on mount
   useEffect(() => {
-    const loggedInUser = JSON.parse(localStorage.getItem('currentUser'))
-    
-    if (loggedInUser) {
-      setCurrentUser(loggedInUser)
-      setCurrentView('dashboard')
-    }
 
     // Fetch posts from MongoDB via backend
     fetch('/api/posts')
@@ -104,7 +110,7 @@ function App() {
       clearForm()
       setCurrentView('dashboard')
       addToast('Conta criada com sucesso! Bem-vindo.', 'success')
-    } catch (err) {
+    } catch {
       addToast('Erro no servidor ao tentar registrar.', 'error')
     }
   }
@@ -137,7 +143,7 @@ function App() {
       clearForm()
       setCurrentView('dashboard')
       addToast('Login realizado com sucesso!', 'success')
-    } catch (err) {
+    } catch {
       addToast('Erro no servidor ao tentar logar.', 'error')
     }
   }
@@ -162,6 +168,23 @@ function App() {
     reader.onloadend = () => {
       setPostMedia(reader.result);
       setPostMediaType(file.type.startsWith('video/') ? 'video' : 'image');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  const handleReplyMediaUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.size > 5000000) {
+      addToast('Arquivo muito grande! Máximo 5MB.', 'error');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setReplyMedia(reader.result);
+      setReplyMediaType(file.type.startsWith('video/') ? 'video' : 'image');
     };
     reader.readAsDataURL(file);
   }
@@ -202,8 +225,49 @@ function App() {
       setPostMedia(null);
       setPostMediaType('');
       setTaggedUsers([]);
-    } catch (err) {
+    } catch {
       addToast('Erro de conexão ao publicar desafio. O arquivo pode ser muito grande para o servidor.', 'error');
+    }
+  }
+
+  const handleCreateReply = async (e, parentId) => {
+    e.preventDefault();
+    if (!replyText.trim() && !replyMedia) {
+      addToast('A resposta não pode estar vazia.', 'error');
+      return;
+    }
+
+    const replyData = {
+      author: currentUser,
+      text: replyText,
+      media: replyMedia,
+      mediaType: replyMediaType,
+      taggedUsers: [],
+      timestamp: new Date().toISOString(),
+      parentId
+    };
+
+    try {
+      const response = await fetch('/api/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(replyData)
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        addToast(data.error || 'Erro ao enviar resposta.', 'error');
+        return;
+      }
+
+      setPosts(prev => [data, ...prev]);
+      addToast('Resposta enviada!', 'success');
+      setReplyText('');
+      setReplyMedia(null);
+      setReplyMediaType('');
+      setActiveReplyId(null);
+    } catch {
+      addToast('Erro de conexão ao enviar resposta.', 'error');
     }
   }
 
@@ -225,7 +289,7 @@ function App() {
             <div className="form-group">
               <label>Endereço de E-mail</label>
               <input 
-                type="email" 
+                type="text" 
                 placeholder="seu@email.com" 
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -265,9 +329,7 @@ function App() {
             {showQR && (
               <div style={{ background: 'white', padding: '20px', borderRadius: '16px', margin: '20px auto 0', width: 'fit-content', boxShadow: '0 4px 20px rgba(0,0,0,0.5)', animation: 'slideUp 0.3s ease-out' }}>
                 <QRCode 
-                  value={window.location.hostname === 'localhost' 
-                    ? `http://${typeof __LOCAL_IP__ !== 'undefined' ? __LOCAL_IP__ : 'localhost'}:${window.location.port}`
-                    : window.location.href} 
+                  value="http://192.168.200.103:5173/"
                   size={180} 
                 />
                 <p style={{color: '#0f172a', fontSize: '14px', marginTop: '16px', fontWeight: '600', marginBottom: '0'}}>
@@ -299,7 +361,7 @@ function App() {
             <div className="form-group">
               <label>Endereço de E-mail</label>
               <input 
-                type="email" 
+                type="text" 
                 placeholder="seu@email.com" 
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -397,40 +459,113 @@ function App() {
 
              <div className="timeline">
                <h3>Linha do Tempo</h3>
-               {posts.length === 0 ? (
+               {posts.filter(p => !p.parentId).length === 0 ? (
                  <p className="empty-timeline">Nenhum desafio publicado ainda. Seja o primeiro!</p>
                ) : (
-                 posts.map(post => (
-                   <div key={post.id} className="post-card">
-                     <div className="post-header">
-                       <div className="author-info">
-                         <div className="avatar">{post.author.name.charAt(0).toUpperCase()}</div>
-                         <div className="author-details">
-                           <strong>{post.author.name}</strong>
-                           <span className="timestamp">{new Date(post.timestamp).toLocaleString()}</span>
+                 posts.filter(p => !p.parentId).map(post => {
+                   const replies = posts.filter(p => String(p.parentId) === String(post.id));
+                   return (
+                     <div key={post.id} className="post-card">
+                       <div className="post-header">
+                         <div className="author-info">
+                           <div className="avatar">{post.author.name.charAt(0).toUpperCase()}</div>
+                           <div className="author-details">
+                             <strong>{post.author.name}</strong>
+                             <span className="timestamp">{new Date(post.timestamp).toLocaleString()}</span>
+                           </div>
                          </div>
                        </div>
-                     </div>
-                     
-                     {post.taggedUsers && post.taggedUsers.length > 0 && (
-                       <div className="post-tags">
-                         <strong>Com:</strong> {post.taggedUsers.map(u => u.name).join(', ')}
-                       </div>
-                     )}
-                     
-                     <p className="post-text">{post.text}</p>
-                     
-                     {post.media && (
-                       <div className="post-media">
-                         {post.mediaType === 'video' ? (
-                            <video src={post.media} controls />
-                         ) : (
-                            <img src={post.media} alt="Post media" />
+                       
+                       {post.taggedUsers && post.taggedUsers.length > 0 && (
+                         <div className="post-tags">
+                           <strong>Com:</strong> {post.taggedUsers.map(u => u.name).join(', ')}
+                         </div>
+                       )}
+                       
+                       <p className="post-text">{post.text}</p>
+                       
+                       {post.media && (
+                         <div className="post-media">
+                           {post.mediaType === 'video' ? (
+                              <video src={post.media} controls />
+                           ) : (
+                              <img src={post.media} alt="Post media" />
+                           )}
+                         </div>
+                       )}
+
+                       {/* Replies Section */}
+                       <div className="replies-section">
+                         {replies.length > 0 && (
+                           <div className="replies-list">
+                             {replies.map(reply => (
+                               <div key={reply.id} className="reply-card">
+                                 <div className="reply-author">
+                                   <div className="avatar avatar-sm">{reply.author.name.charAt(0).toUpperCase()}</div>
+                                   <div className="author-details">
+                                     <strong>{reply.author.name}</strong>
+                                     <span className="timestamp">{new Date(reply.timestamp).toLocaleString()}</span>
+                                   </div>
+                                 </div>
+                                 {reply.text && <p className="post-text">{reply.text}</p>}
+                                 {reply.media && (
+                                   <div className="post-media">
+                                     {reply.mediaType === 'video' ? (
+                                       <video src={reply.media} controls />
+                                     ) : (
+                                       <img src={reply.media} alt="Resposta" />
+                                     )}
+                                   </div>
+                                 )}
+                               </div>
+                             ))}
+                           </div>
+                         )}
+
+                         <button
+                           type="button"
+                           className="reply-toggle-btn"
+                           onClick={() => {
+                             setActiveReplyId(activeReplyId === post.id ? null : post.id);
+                             setReplyText('');
+                             setReplyMedia(null);
+                             setReplyMediaType('');
+                           }}
+                         >
+                           {activeReplyId === post.id ? '✕ Cancelar' : `💬 Responder Desafio${replies.length > 0 ? ` (${replies.length})` : ''}`}
+                         </button>
+
+                         {activeReplyId === post.id && (
+                           <form className="reply-form" onSubmit={(e) => handleCreateReply(e, post.id)}>
+                             <textarea
+                               className="post-input reply-input"
+                               placeholder="Escreva sua resposta ao desafio..."
+                               value={replyText}
+                               onChange={(e) => setReplyText(e.target.value)}
+                             />
+                             {replyMedia && (
+                               <div className="media-preview">
+                                 {replyMediaType === 'video' ? (
+                                   <video src={replyMedia} controls />
+                                 ) : (
+                                   <img src={replyMedia} alt="Preview" />
+                                 )}
+                                 <button type="button" onClick={() => { setReplyMedia(null); setReplyMediaType(''); }}>Remover</button>
+                               </div>
+                             )}
+                             <div className="reply-actions">
+                               <div className="upload-btn-wrapper">
+                                 <button type="button" className="btn-secondary">📷 Foto/Vídeo</button>
+                                 <input type="file" accept="image/*,video/*" onChange={handleReplyMediaUpload} />
+                               </div>
+                               <button type="submit" className="btn-primary reply-submit-btn">Enviar Resposta</button>
+                             </div>
+                           </form>
                          )}
                        </div>
-                     )}
-                   </div>
-                 ))
+                     </div>
+                   );
+                 })
                )}
              </div>
           </div>

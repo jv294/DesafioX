@@ -38,8 +38,8 @@ async function startServer() {
     console.log(' Conectado com sucesso ao MongoDB Atlas! ');
     console.log('==================================================');
 
-    app.listen(PORT, () => {
-      console.log(`Servidor rodando em http://localhost:${PORT}`);
+    app.listen(3001, () => {
+      console.log(`Servidor rodando em http://localhost:${3001}`);
     });
   } catch (err) {
     console.error('\n❌ ERRO CRÍTICO: Não foi possível conectar ao MongoDB Atlas.');
@@ -118,6 +118,7 @@ app.get('/api/posts', async (req, res) => {
     const posts = await postsCollection.find({}).sort({ timestamp: -1 }).toArray();
     res.json(posts.map(post => ({
       id: post._id,
+      parentId: post.parentId || null,
       author: post.author,
       text: post.text,
       media: post.media,
@@ -132,13 +133,14 @@ app.get('/api/posts', async (req, res) => {
 
 // Create a post
 app.post('/api/posts', async (req, res) => {
-  const { author, text, media, mediaType, taggedUsers, timestamp } = req.body;
+  const { author, text, media, mediaType, taggedUsers, timestamp, parentId } = req.body;
   if (!author) {
     return res.status(400).json({ error: 'Autor do post não fornecido.' });
   }
 
   try {
     const newPost = {
+      parentId: parentId || null,
       author,
       text: text || '',
       media: media || null,

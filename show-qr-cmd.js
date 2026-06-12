@@ -13,9 +13,7 @@ function getLocalIp() {
   return 'localhost';
 }
 
-const localIp = getLocalIp();
-const port = 5173; // Porta padrão do Vite (ajuste se mudar no vite.config.js)
-const url = `http://${localIp}:${port}`;
+const url = `http://192.168.200.103:5173`;
 
 // Pequeno atraso para garantir que o Vite já tenha subido
 setTimeout(() => {
