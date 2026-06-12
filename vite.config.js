@@ -17,41 +17,26 @@ function getLocalIp() {
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/DesafioX/',
-  server: {
-    host: '0.0.0.0', // Permite que o servidor seja acessado de outros aparelhos na rede local
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      }
-    }
-  },
-  define: {
-    __LOCAL_IP__: JSON.stringify(getLocalIp())
-  },
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      devOptions: {
-        enabled: true
-      },
       manifest: {
-        name: 'Desafio X',
+        name: 'Nome do Seu DesafioX',
         short_name: 'DesafioX',
-        description: 'Rede social híbrida para desafios',
-        theme_color: '#0f172a',
-        background_color: '#2a180fff',
+        description: 'Minha aplicação PWA na Vercel',
+        theme_color: '#ffffff',
+        start_url: '/',
+        scope: '/',
         display: 'standalone',
+        background_color: '#ffffff',
         icons: [
-          {
-            src: 'icon.svg',
-            sizes: '192x192 512x512',
-            type: 'image/svg+xml'
-          }
+          { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' }
         ]
       }
     })
-  ]
+  ],
+
+  base: '/',
 })

@@ -4,7 +4,7 @@ import './index.css'
 import App from './App.jsx'
 import { registerSW } from 'virtual:pwa-register'
 
-// Registrar Service Worker para suporte a offline e atualizações automáticas
+
 registerSW({
   onNeedRefresh() {
     console.log('Novo conteúdo disponível. Recarregue a página.');
