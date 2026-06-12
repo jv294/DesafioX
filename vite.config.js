@@ -17,6 +17,7 @@ function getLocalIp() {
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: '/DesafioX/',
   server: {
     host: '0.0.0.0', // Permite que o servidor seja acessado de outros aparelhos na rede local
     proxy: {

@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import QRCode from 'react-qr-code'
 import './App.css'
 
+const API_URL = import.meta.env.VITE_API_URL || ''
+
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     const loggedInUser = localStorage.getItem('currentUser')
@@ -47,7 +49,7 @@ function App() {
   useEffect(() => {
 
     // Fetch posts from MongoDB via backend
-    fetch('/api/posts')
+    fetch(`${API_URL}/api/posts`)
       .then(res => res.json())
       .then(data => {
         if (!data.error) setPosts(data)
@@ -55,7 +57,7 @@ function App() {
       .catch(err => console.error('Erro ao buscar posts:', err))
 
     // Fetch users from MongoDB via backend
-    fetch('/api/users')
+    fetch(`${API_URL}/api/users`)
       .then(res => res.json())
       .then(data => {
         if (!data.error) setUsers(data)
@@ -86,7 +88,7 @@ function App() {
     }
 
     try {
-      const response = await fetch('/api/register', {
+      const response = await fetch(`${API_URL}/api/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password })
@@ -124,7 +126,7 @@ function App() {
     }
 
     try {
-      const response = await fetch('/api/login', {
+      const response = await fetch(`${API_URL}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
@@ -206,7 +208,7 @@ function App() {
     };
 
     try {
-      const response = await fetch('/api/posts', {
+      const response = await fetch(`${API_URL}/api/posts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newPostData)
@@ -248,7 +250,7 @@ function App() {
     };
 
     try {
-      const response = await fetch('/api/posts', {
+      const response = await fetch(`${API_URL}/api/posts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(replyData)
@@ -329,7 +331,7 @@ function App() {
             {showQR && (
               <div style={{ background: 'white', padding: '20px', borderRadius: '16px', margin: '20px auto 0', width: 'fit-content', boxShadow: '0 4px 20px rgba(0,0,0,0.5)', animation: 'slideUp 0.3s ease-out' }}>
                 <QRCode 
-                  value="http://192.168.200.103:5173/"
+                  value={window.location.origin + window.location.pathname}
                   size={180} 
                 />
                 <p style={{color: '#0f172a', fontSize: '14px', marginTop: '16px', fontWeight: '600', marginBottom: '0'}}>
