@@ -1,3 +1,115 @@
+# Desafio X
+
+## Descrição
+
+O Desafio X é uma rede social que permite aos usuários compartilhar fotos, vídeos e mensagens uns com os outros.
+
+### [Repositorio do GitHub](https://github.com/jv294/DesafioX)
+
+## Integrantes
+
+- João Vitor Afonso Damascena (202312489)
+- Leandro Lima Cardoso (202323366)
+- José Carlos Lago Carvalho Neto (202312488)
+- Almir Coelho Rubim Junior (202312480)
+
+## Matriz de Funcionalidades:
+
+<table>
+  <thead>
+    <tr>
+      <th>funcionalidade</th>
+      <th>hibrido</th>
+      <th>nativo</th>
+      <th>tecnologia/recurso</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>login</td>
+      <td>✔</td>
+      <td>✔</td>
+      <td>React + Vite</td>
+    </tr>
+    <tr>
+      <td>cadastro</td>
+      <td>✔</td>
+      <td>✔</td>
+      <td>React + Vite</td>
+    </tr>
+    <tr>
+      <td>uplood de midia</td>
+      <td>✔</td>
+      <td>✔</td>
+      <td>React + Vite</td>
+    </tr>
+    <tr>
+      <td>caixa de mensagens</td>
+      <td>✔</td>
+      <td>✔</td>
+      <td>React + Vite</td>
+    </tr>
+  </tbody>
+</table>
+
+## Matriz de Migração:
+
+<table>
+  <thead>
+    <tr>
+      <th>funcionalidade</th>
+      <th>Existe?</th>
+      <th>Funciona?</th>
+      <th>Será mantida?</th>
+      <th>Precisa melhorar?</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>login</td>
+      <td>Sim</td>
+      <td>Sim</td>
+      <td>Sim</td>
+      <td>Sim</td>
+    </tr>
+    <tr>
+      <td>cadastro</td>
+      <td>Sim</td>
+      <td>Sim</td>
+      <td>Sim</td>
+      <td>Sim</td>
+    </tr>
+    <tr>
+      <td>uplood de midia</td>
+      <td>Sim</td>
+      <td>Sim</td>
+      <td>Sim</td>
+      <td>Sim</td>
+    </tr>
+    <tr>
+      <td>caixa de mensagens</td>
+      <td>Sim</td>
+      <td>Sim</td>
+      <td>Sim</td>
+      <td>Sim</td>
+    </tr>
+  </tbody>
+</table>
+
+## Proposta de evolução
+
+1. Adaptação para o usuário.
+2. Proibição de postagem ofensiva, nociva e toxica.
+3. Bloquear acesso de menores de idade.
+
+<br>
+
+---
+---
+---
+
+<br>
+
 # React + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
