@@ -108,6 +108,8 @@ O Desafio X é uma rede social que permite aos usuários compartilhar fotos, ví
 * Melhorar perfil do usuário.
 * Restrição de idade no cadastro.
 * Sistema de Progresso e XP.
+* Centralizar as configurações de estilo.
+* Personaliza o perfil do usuário.
 
 <br>
 
