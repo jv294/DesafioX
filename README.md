@@ -12,6 +12,7 @@ O Desafio X é uma rede social que permite aos usuários compartilhar fotos, ví
 - Leandro Lima Cardoso (202323366)
 - José Carlos Lago Carvalho Neto (202312488)
 - Almir Coelho Rubim Junior (202312480)
+- Laura Gomes da Fonseca (202312824)
 
 ## Matriz de Funcionalidades:
 
@@ -101,6 +102,10 @@ O Desafio X é uma rede social que permite aos usuários compartilhar fotos, ví
 1. Adaptação para o usuário.
 2. Proibição de postagem ofensiva, nociva e toxica.
 3. Bloquear acesso de menores de idade.
+
+## Funcionalidades a serem desenvolvidas
+
+* 
 
 <br>
 
