@@ -81,7 +81,7 @@ O Desafio X é uma rede social que permite aos usuários compartilhar fotos, ví
       <td>Sim</td>
     </tr>
     <tr>
-      <td>uplood de midia</td>
+      <td>upload de midia</td>
       <td>Sim</td>
       <td>Sim</td>
       <td>Sim</td>
