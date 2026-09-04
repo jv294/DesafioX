@@ -4,6 +4,11 @@ import './App.css'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
 
+// Helper to generate unique offline IDs safely
+function generateTempId(prefix = 'offline') {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+}
+
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -105,50 +110,13 @@ function App() {
   }, [])
 
   const addToast = useCallback((message, type = 'info') => {
-    const id = Date.now() + Math.random()
+    const id = generateTempId('toast')
     setToasts(prev => [...prev, { id, message, type }])
     
     setTimeout(() => {
       removeToast(id)
     }, 4500)
   }, [removeToast])
-
-  // Fetch initial data
-  const fetchData = useCallback(async () => {
-    if (!navigator.onLine) return
-
-    try {
-      // Fetch posts
-      const postsRes = await fetch(`${API_URL}/api/posts`)
-      if (postsRes.ok) {
-        const postsData = await postsRes.json()
-        if (!postsData.error && Array.isArray(postsData)) {
-          // Merge with any local pending posts not yet in server
-          setPosts(prev => {
-            const pending = prev.filter(p => p.pendingSync)
-            const serverPostIds = new Set(postsData.map(p => String(p.id)))
-            const uniquePending = pending.filter(p => !serverPostIds.has(String(p.id)))
-            return [...uniquePending, ...postsData]
-          })
-        }
-      }
-    } catch (err) {
-      console.warn('Não foi possível atualizar posts do servidor:', err)
-    }
-
-    try {
-      // Fetch users
-      const usersRes = await fetch(`${API_URL}/api/users`)
-      if (usersRes.ok) {
-        const usersData = await usersRes.json()
-        if (!usersData.error && Array.isArray(usersData)) {
-          setUsers(usersData)
-        }
-      }
-    } catch (err) {
-      console.warn('Não foi possível atualizar usuários do servidor:', err)
-    }
-  }, [])
 
   // Sync Offline Queue
   const syncOfflineQueue = useCallback(async () => {
@@ -170,7 +138,6 @@ function App() {
         if (response.ok) {
           const serverPost = await response.json()
           successCount++
-          // Update post state by replacing the temporary local ID with the server post
           setPosts(prev => prev.map(p => (p.id === item.tempId ? serverPost : p)))
         } else {
           remainingQueue.push(item)
@@ -186,16 +153,50 @@ function App() {
 
     if (successCount > 0) {
       addToast(`Sincronização concluída! ${successCount} item(ns) enviado(s) com sucesso.`, 'success')
-      fetchData()
     }
-  }, [addToast, fetchData])
+  }, [addToast])
 
-  // Listen for online / offline network events
+  // Listen for online / offline network events and fetch initial data
   useEffect(() => {
+    let isMounted = true
+
+    const loadData = async () => {
+      if (!navigator.onLine) return
+
+      try {
+        const postsRes = await fetch(`${API_URL}/api/posts`)
+        if (postsRes.ok && isMounted) {
+          const postsData = await postsRes.json()
+          if (!postsData.error && Array.isArray(postsData)) {
+            setPosts(prev => {
+              const pending = prev.filter(p => p.pendingSync)
+              const serverPostIds = new Set(postsData.map(p => String(p.id)))
+              const uniquePending = pending.filter(p => !serverPostIds.has(String(p.id)))
+              return [...uniquePending, ...postsData]
+            })
+          }
+        }
+      } catch (err) {
+        console.warn('Não foi possível atualizar posts do servidor:', err)
+      }
+
+      try {
+        const usersRes = await fetch(`${API_URL}/api/users`)
+        if (usersRes.ok && isMounted) {
+          const usersData = await usersRes.json()
+          if (!usersData.error && Array.isArray(usersData)) {
+            setUsers(usersData)
+          }
+        }
+      } catch (err) {
+        console.warn('Não foi possível atualizar usuários do servidor:', err)
+      }
+    }
+
     const handleOnline = () => {
       setIsOnline(true)
       addToast('Conexão restabelecida! Você está online.', 'success')
-      fetchData()
+      loadData()
       syncOfflineQueue()
     }
 
@@ -207,14 +208,14 @@ function App() {
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
 
-    // Initial load
-    fetchData()
+    loadData()
 
     return () => {
+      isMounted = false
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
-  }, [addToast, fetchData, syncOfflineQueue])
+  }, [addToast, syncOfflineQueue])
 
   const clearForm = () => {
     setName('')
@@ -272,7 +273,6 @@ function App() {
       return
     }
 
-    // If offline, check if user is already registered in local cache
     if (!isOnline) {
       const cachedUser = users.find(u => u.email.toLowerCase() === email.trim().toLowerCase())
       if (cachedUser) {
@@ -370,15 +370,13 @@ function App() {
       timestamp: new Date().toISOString()
     }
 
-    // Clean inputs immediately
     setPostText('')
     setPostMedia(null)
     setPostMediaType('')
     setTaggedUsers([])
 
-    // If offline, save locally to offline queue
     if (!navigator.onLine) {
-      const tempId = 'offline_post_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)
+      const tempId = generateTempId('offline_post')
       const localPost = {
         ...newPostData,
         id: tempId,
@@ -407,8 +405,7 @@ function App() {
       setPosts(prev => [data, ...prev])
       addToast('Desafio publicado com sucesso!', 'success')
     } catch {
-      // If request failed due to unexpected network drop, save offline
-      const tempId = 'offline_post_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)
+      const tempId = generateTempId('offline_post')
       const localPost = {
         ...newPostData,
         id: tempId,
@@ -437,15 +434,13 @@ function App() {
       parentId
     }
 
-    // Reset inputs
     setReplyText('')
     setReplyMedia(null)
     setReplyMediaType('')
     setActiveReplyId(null)
 
-    // If offline, save to offline queue
     if (!navigator.onLine) {
-      const tempId = 'offline_reply_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)
+      const tempId = generateTempId('offline_reply')
       const localReply = {
         ...replyData,
         id: tempId,
@@ -473,7 +468,7 @@ function App() {
       setPosts(prev => [data, ...prev])
       addToast('Resposta enviada!', 'success')
     } catch {
-      const tempId = 'offline_reply_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)
+      const tempId = generateTempId('offline_reply')
       const localReply = {
         ...replyData,
         id: tempId,
@@ -879,4 +874,5 @@ function App() {
 }
 
 export default App
+
 

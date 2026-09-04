@@ -30,7 +30,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['server.js', 'show-qr-cmd.js'],
+    files: ['server.js', 'show-qr-cmd.js', 'api/**/*.js'],
     languageOptions: {
       globals: {
         ...globals.node,

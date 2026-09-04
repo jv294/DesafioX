@@ -13,7 +13,7 @@ function getLocalIp() {
   return 'localhost';
 }
 
-const url = `http://192.168.200.103:5173`;
+const url = `http://${getLocalIp()}:5173`;
 
 // Pequeno atraso para garantir que o Vite já tenha subido
 setTimeout(() => {
