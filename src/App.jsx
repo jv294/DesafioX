@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import QRCode from 'react-qr-code'
 import './App.css'
 
@@ -6,20 +6,53 @@ const API_URL = import.meta.env.VITE_API_URL || ''
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
-    const loggedInUser = localStorage.getItem('currentUser')
-    return loggedInUser ? JSON.parse(loggedInUser) : null
+    try {
+      const loggedInUser = localStorage.getItem('currentUser')
+      return loggedInUser ? JSON.parse(loggedInUser) : null
+    } catch {
+      return null
+    }
   })
+
   const [currentView, setCurrentView] = useState(() => {
     const loggedInUser = localStorage.getItem('currentUser')
     return loggedInUser ? 'dashboard' : 'login'
   })
-  const [users, setUsers] = useState([])
-  
+
+  // Network & Offline Status
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true))
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [offlineQueue, setOfflineQueue] = useState(() => {
+    try {
+      const savedQueue = localStorage.getItem('desafiox_offline_queue')
+      return savedQueue ? JSON.parse(savedQueue) : []
+    } catch {
+      return []
+    }
+  })
+
   // Toast notifications state
   const [toasts, setToasts] = useState([])
 
-  // Posts state
-  const [posts, setPosts] = useState([])
+  // Cached Users & Posts State
+  const [users, setUsers] = useState(() => {
+    try {
+      const cached = localStorage.getItem('desafiox_cached_users')
+      return cached ? JSON.parse(cached) : []
+    } catch {
+      return []
+    }
+  })
+
+  const [posts, setPosts] = useState(() => {
+    try {
+      const cached = localStorage.getItem('desafiox_cached_posts')
+      return cached ? JSON.parse(cached) : []
+    } catch {
+      return []
+    }
+  })
+
   const [postText, setPostText] = useState('')
   const [postMedia, setPostMedia] = useState(null)
   const [postMediaType, setPostMediaType] = useState('')
@@ -31,46 +64,157 @@ function App() {
   const [replyMedia, setReplyMedia] = useState(null)
   const [replyMediaType, setReplyMediaType] = useState('')
 
-  const removeToast = useCallback((id) => {
-    setToasts(prev => prev.filter(toast => toast.id !== id))
-  }, [])
-
-  const addToast = useCallback((message, type = 'info') => {
-    const id = Date.now()
-    setToasts(prev => [...prev, { id, message, type }])
-    
-    // Auto remove after 4 seconds
-    setTimeout(() => {
-      removeToast(id)
-    }, 4000)
-  }, [removeToast])
-
-  // Load data on mount
-  useEffect(() => {
-
-    // Fetch posts from MongoDB via backend
-    fetch(`${API_URL}/api/posts`)
-      .then(res => res.json())
-      .then(data => {
-        if (!data.error) setPosts(data)
-      })
-      .catch(err => console.error('Erro ao buscar posts:', err))
-
-    // Fetch users from MongoDB via backend
-    fetch(`${API_URL}/api/users`)
-      .then(res => res.json())
-      .then(data => {
-        if (!data.error) setUsers(data)
-      })
-      .catch(err => console.error('Erro ao buscar usuários:', err))
-  }, [])
-
   // Input states
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [showQR, setShowQR] = useState(false)
+
+  // References to avoid stale closures in listeners
+  const offlineQueueRef = useRef(offlineQueue)
+  useEffect(() => {
+    offlineQueueRef.current = offlineQueue
+    try {
+      localStorage.setItem('desafiox_offline_queue', JSON.stringify(offlineQueue))
+    } catch (e) {
+      console.warn('Falha ao salvar offline queue no localStorage:', e)
+    }
+  }, [offlineQueue])
+
+  // Save cached posts to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('desafiox_cached_posts', JSON.stringify(posts))
+    } catch (e) {
+      console.warn('Falha ao salvar posts no cache local:', e)
+    }
+  }, [posts])
+
+  // Save cached users to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('desafiox_cached_users', JSON.stringify(users))
+    } catch (e) {
+      console.warn('Falha ao salvar usuários no cache local:', e)
+    }
+  }, [users])
+
+  const removeToast = useCallback((id) => {
+    setToasts(prev => prev.filter(toast => toast.id !== id))
+  }, [])
+
+  const addToast = useCallback((message, type = 'info') => {
+    const id = Date.now() + Math.random()
+    setToasts(prev => [...prev, { id, message, type }])
+    
+    setTimeout(() => {
+      removeToast(id)
+    }, 4500)
+  }, [removeToast])
+
+  // Fetch initial data
+  const fetchData = useCallback(async () => {
+    if (!navigator.onLine) return
+
+    try {
+      // Fetch posts
+      const postsRes = await fetch(`${API_URL}/api/posts`)
+      if (postsRes.ok) {
+        const postsData = await postsRes.json()
+        if (!postsData.error && Array.isArray(postsData)) {
+          // Merge with any local pending posts not yet in server
+          setPosts(prev => {
+            const pending = prev.filter(p => p.pendingSync)
+            const serverPostIds = new Set(postsData.map(p => String(p.id)))
+            const uniquePending = pending.filter(p => !serverPostIds.has(String(p.id)))
+            return [...uniquePending, ...postsData]
+          })
+        }
+      }
+    } catch (err) {
+      console.warn('Não foi possível atualizar posts do servidor:', err)
+    }
+
+    try {
+      // Fetch users
+      const usersRes = await fetch(`${API_URL}/api/users`)
+      if (usersRes.ok) {
+        const usersData = await usersRes.json()
+        if (!usersData.error && Array.isArray(usersData)) {
+          setUsers(usersData)
+        }
+      }
+    } catch (err) {
+      console.warn('Não foi possível atualizar usuários do servidor:', err)
+    }
+  }, [])
+
+  // Sync Offline Queue
+  const syncOfflineQueue = useCallback(async () => {
+    const currentQueue = offlineQueueRef.current
+    if (currentQueue.length === 0 || !navigator.onLine) return
+
+    setIsSyncing(true)
+    let successCount = 0
+    const remainingQueue = []
+
+    for (const item of currentQueue) {
+      try {
+        const response = await fetch(`${API_URL}/api/posts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(item.payload)
+        })
+
+        if (response.ok) {
+          const serverPost = await response.json()
+          successCount++
+          // Update post state by replacing the temporary local ID with the server post
+          setPosts(prev => prev.map(p => (p.id === item.tempId ? serverPost : p)))
+        } else {
+          remainingQueue.push(item)
+        }
+      } catch (err) {
+        console.error('Erro ao sincronizar item offline:', err)
+        remainingQueue.push(item)
+      }
+    }
+
+    setOfflineQueue(remainingQueue)
+    setIsSyncing(false)
+
+    if (successCount > 0) {
+      addToast(`Sincronização concluída! ${successCount} item(ns) enviado(s) com sucesso.`, 'success')
+      fetchData()
+    }
+  }, [addToast, fetchData])
+
+  // Listen for online / offline network events
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true)
+      addToast('Conexão restabelecida! Você está online.', 'success')
+      fetchData()
+      syncOfflineQueue()
+    }
+
+    const handleOffline = () => {
+      setIsOnline(false)
+      addToast('Conexão perdida. O aplicativo continuará funcionando no modo offline.', 'warning')
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    // Initial load
+    fetchData()
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [addToast, fetchData, syncOfflineQueue])
 
   const clearForm = () => {
     setName('')
@@ -84,6 +228,11 @@ function App() {
     
     if (!name || !email || !password) {
       addToast('Por favor, preencha todos os campos.', 'error')
+      return
+    }
+
+    if (!isOnline) {
+      addToast('Cadastro requer conexão com a internet. Conecte-se e tente novamente.', 'warning')
       return
     }
 
@@ -103,9 +252,7 @@ function App() {
       
       const newUser = { id: data.id, name: data.name, email: data.email }
       
-      // Update users list for tagging
-      setUsers([...users, newUser])
-      
+      setUsers(prev => [...prev, newUser])
       setCurrentUser(newUser)
       localStorage.setItem('currentUser', JSON.stringify(newUser))
       
@@ -123,6 +270,22 @@ function App() {
     if (!email || !password) {
       addToast('Por favor, informe seu e-mail e senha.', 'error')
       return
+    }
+
+    // If offline, check if user is already registered in local cache
+    if (!isOnline) {
+      const cachedUser = users.find(u => u.email.toLowerCase() === email.trim().toLowerCase())
+      if (cachedUser) {
+        setCurrentUser(cachedUser)
+        localStorage.setItem('currentUser', JSON.stringify(cachedUser))
+        clearForm()
+        setCurrentView('dashboard')
+        addToast(`Entrando em modo offline como ${cachedUser.name}.`, 'info')
+        return
+      } else {
+        addToast('Você está offline. Para acessar novas contas, conecte-se à internet.', 'warning')
+        return
+      }
     }
 
     try {
@@ -158,44 +321,44 @@ function App() {
   }
 
   const handleMediaUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const file = e.target.files[0]
+    if (!file) return
 
     if (file.size > 5000000) {
-      addToast('Arquivo muito grande! Máximo 5MB.', 'error');
-      return;
+      addToast('Arquivo muito grande! Máximo 5MB.', 'error')
+      return
     }
 
-    const reader = new FileReader();
+    const reader = new FileReader()
     reader.onloadend = () => {
-      setPostMedia(reader.result);
-      setPostMediaType(file.type.startsWith('video/') ? 'video' : 'image');
-    };
-    reader.readAsDataURL(file);
+      setPostMedia(reader.result)
+      setPostMediaType(file.type.startsWith('video/') ? 'video' : 'image')
+    }
+    reader.readAsDataURL(file)
   }
 
   const handleReplyMediaUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const file = e.target.files[0]
+    if (!file) return
 
     if (file.size > 5000000) {
-      addToast('Arquivo muito grande! Máximo 5MB.', 'error');
-      return;
+      addToast('Arquivo muito grande! Máximo 5MB.', 'error')
+      return
     }
 
-    const reader = new FileReader();
+    const reader = new FileReader()
     reader.onloadend = () => {
-      setReplyMedia(reader.result);
-      setReplyMediaType(file.type.startsWith('video/') ? 'video' : 'image');
-    };
-    reader.readAsDataURL(file);
+      setReplyMedia(reader.result)
+      setReplyMediaType(file.type.startsWith('video/') ? 'video' : 'image')
+    }
+    reader.readAsDataURL(file)
   }
 
   const handleCreatePost = async (e) => {
-    e.preventDefault();
+    e.preventDefault()
     if (!postText.trim() && !postMedia) {
-      addToast('O post não pode estar vazio.', 'error');
-      return;
+      addToast('O post não pode estar vazio.', 'error')
+      return
     }
     
     const newPostData = {
@@ -205,38 +368,63 @@ function App() {
       mediaType: postMediaType,
       taggedUsers: users.filter(u => taggedUsers.includes(u.email)),
       timestamp: new Date().toISOString()
-    };
+    }
+
+    // Clean inputs immediately
+    setPostText('')
+    setPostMedia(null)
+    setPostMediaType('')
+    setTaggedUsers([])
+
+    // If offline, save locally to offline queue
+    if (!navigator.onLine) {
+      const tempId = 'offline_post_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)
+      const localPost = {
+        ...newPostData,
+        id: tempId,
+        pendingSync: true
+      }
+
+      setPosts(prev => [localPost, ...prev])
+      setOfflineQueue(prev => [...prev, { tempId, type: 'post', payload: newPostData }])
+      addToast('Modo Offline: Desafio salvo localmente. Ele será enviado automaticamente ao reconectar!', 'warning')
+      return
+    }
 
     try {
       const response = await fetch(`${API_URL}/api/posts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newPostData)
-      });
-      const data = await response.json();
+      })
+      const data = await response.json()
       
       if (!response.ok) {
-        addToast(data.error || 'Erro ao publicar desafio.', 'error');
-        return;
+        addToast(data.error || 'Erro ao publicar desafio.', 'error')
+        return
       }
 
-      setPosts(prev => [data, ...prev]);
-      addToast('Desafio publicado com sucesso!', 'success');
-
-      setPostText('');
-      setPostMedia(null);
-      setPostMediaType('');
-      setTaggedUsers([]);
+      setPosts(prev => [data, ...prev])
+      addToast('Desafio publicado com sucesso!', 'success')
     } catch {
-      addToast('Erro de conexão ao publicar desafio. O arquivo pode ser muito grande para o servidor.', 'error');
+      // If request failed due to unexpected network drop, save offline
+      const tempId = 'offline_post_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)
+      const localPost = {
+        ...newPostData,
+        id: tempId,
+        pendingSync: true
+      }
+      setPosts(prev => [localPost, ...prev])
+      setOfflineQueue(prev => [...prev, { tempId, type: 'post', payload: newPostData }])
+      addToast('Sem conexão. O desafio foi guardado na fila offline e será enviado ao reconectar.', 'warning')
     }
   }
 
   const handleCreateReply = async (e, parentId) => {
-    e.preventDefault();
+    e.preventDefault()
     if (!replyText.trim() && !replyMedia) {
-      addToast('A resposta não pode estar vazia.', 'error');
-      return;
+      addToast('A resposta não pode estar vazia.', 'error')
+      return
     }
 
     const replyData = {
@@ -247,29 +435,53 @@ function App() {
       taggedUsers: [],
       timestamp: new Date().toISOString(),
       parentId
-    };
+    }
+
+    // Reset inputs
+    setReplyText('')
+    setReplyMedia(null)
+    setReplyMediaType('')
+    setActiveReplyId(null)
+
+    // If offline, save to offline queue
+    if (!navigator.onLine) {
+      const tempId = 'offline_reply_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)
+      const localReply = {
+        ...replyData,
+        id: tempId,
+        pendingSync: true
+      }
+      setPosts(prev => [localReply, ...prev])
+      setOfflineQueue(prev => [...prev, { tempId, type: 'reply', payload: replyData }])
+      addToast('Modo Offline: Resposta salva localmente. Será enviada assim que reconectar!', 'warning')
+      return
+    }
 
     try {
       const response = await fetch(`${API_URL}/api/posts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(replyData)
-      });
-      const data = await response.json();
+      })
+      const data = await response.json()
 
       if (!response.ok) {
-        addToast(data.error || 'Erro ao enviar resposta.', 'error');
-        return;
+        addToast(data.error || 'Erro ao enviar resposta.', 'error')
+        return
       }
 
-      setPosts(prev => [data, ...prev]);
-      addToast('Resposta enviada!', 'success');
-      setReplyText('');
-      setReplyMedia(null);
-      setReplyMediaType('');
-      setActiveReplyId(null);
+      setPosts(prev => [data, ...prev])
+      addToast('Resposta enviada!', 'success')
     } catch {
-      addToast('Erro de conexão ao enviar resposta.', 'error');
+      const tempId = 'offline_reply_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)
+      const localReply = {
+        ...replyData,
+        id: tempId,
+        pendingSync: true
+      }
+      setPosts(prev => [localReply, ...prev])
+      setOfflineQueue(prev => [...prev, { tempId, type: 'reply', payload: replyData }])
+      addToast('Falha na rede. Resposta guardada offline e será sincronizada automaticamente.', 'warning')
     }
   }
 
@@ -280,9 +492,40 @@ function App() {
 
   return (
     <>
+      {/* Global Status Bar / Indicator */}
+      <div className={`status-indicator-bar ${isOnline ? 'status-online' : 'status-offline'}`}>
+        <div className="status-indicator-content">
+          <span className={`status-dot ${isOnline ? 'dot-online' : 'dot-offline'} ${isSyncing ? 'dot-syncing' : ''}`}></span>
+          <span className="status-label">
+            {isSyncing ? (
+              <>Sincronizando dados...</>
+            ) : isOnline ? (
+              <>Online</>
+            ) : (
+              <>Modo Offline (dados salvos localmente)</>
+            )}
+          </span>
+
+          {offlineQueue.length > 0 && (
+            <span className="pending-badge">
+              {offlineQueue.length} {offlineQueue.length === 1 ? 'pendência' : 'pendências'}
+            </span>
+          )}
+
+          {isOnline && offlineQueue.length > 0 && !isSyncing && (
+            <button type="button" className="btn-sync-now" onClick={syncOfflineQueue}>
+              Sincronizar agora
+            </button>
+          )}
+        </div>
+      </div>
+
       {currentView === 'login' && (
         <div className="app-container">
           <div className="header">
+            <div className="app-logo-badge">
+              <span className="logo-sparkle">✦</span> Desafio X
+            </div>
             <h2>Bem-vindo de volta</h2>
             <p>Faça login para acessar sua conta</p>
           </div>
@@ -291,7 +534,7 @@ function App() {
             <div className="form-group">
               <label>Endereço de E-mail</label>
               <input 
-                type="text" 
+                type="email" 
                 placeholder="seu@email.com" 
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -346,6 +589,9 @@ function App() {
       {currentView === 'register' && (
         <div className="app-container">
           <div className="header">
+            <div className="app-logo-badge">
+              <span className="logo-sparkle">✦</span> Desafio X
+            </div>
             <h2>Criar Conta</h2>
             <p>Junte-se a nós hoje mesmo</p>
           </div>
@@ -363,7 +609,7 @@ function App() {
             <div className="form-group">
               <label>Endereço de E-mail</label>
               <input 
-                type="text" 
+                type="email" 
                 placeholder="seu@email.com" 
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -400,17 +646,34 @@ function App() {
       {currentView === 'dashboard' && currentUser && (
         <div className="app-container dashboard-container">
           <div className="dashboard-nav">
-            <h1>Desafio X</h1>
-            <button onClick={handleLogout} className="btn-primary btn-danger">Sair</button>
+            <div className="dashboard-brand">
+              <h1>Desafio X</h1>
+              <div className={`nav-status-pill ${isOnline ? 'pill-online' : 'pill-offline'}`}>
+                <span className={`status-dot-mini ${isOnline ? 'dot-online' : 'dot-offline'}`}></span>
+                <span>{isOnline ? 'Online' : 'Offline'}</span>
+              </div>
+            </div>
+            <div className="dashboard-user-info">
+              <span className="user-welcome">Olá, <strong>{currentUser.name}</strong></span>
+              <button onClick={handleLogout} className="btn-primary btn-danger">Sair</button>
+            </div>
           </div>
           
           <div className="feed-layout">
              <div className="create-post-card">
-               <h3>Postar um Desafio</h3>
+               <div className="create-post-header">
+                 <h3>Postar um Desafio</h3>
+                 {!isOnline && (
+                   <span className="offline-mode-tag">
+                     💾 Salvando localmente (offline)
+                   </span>
+                 )}
+               </div>
+
                <form onSubmit={handleCreatePost}>
                  <textarea
                    className="post-input"
-                   placeholder="Qual o seu desafio de hoje?"
+                   placeholder={isOnline ? "Qual o seu desafio de hoje?" : "Qual o seu desafio de hoje? (será salvo offline)"}
                    value={postText}
                    onChange={(e) => setPostText(e.target.value)}
                  />
@@ -455,24 +718,43 @@ function App() {
                    </div>
                  </div>
 
-                 <button type="submit" className="btn-primary">Publicar Desafio</button>
+                 <button type="submit" className="btn-primary">
+                   {isOnline ? 'Publicar Desafio' : 'Salvar Desafio Offline'}
+                 </button>
                </form>
              </div>
 
              <div className="timeline">
-               <h3>Linha do Tempo</h3>
+               <div className="timeline-header">
+                 <h3>Linha do Tempo</h3>
+                 {posts.length > 0 && (
+                   <span className="cached-counter">
+                     {posts.filter(p => !p.parentId).length} desafio(s)
+                   </span>
+                 )}
+               </div>
+
                {posts.filter(p => !p.parentId).length === 0 ? (
-                 <p className="empty-timeline">Nenhum desafio publicado ainda. Seja o primeiro!</p>
+                 <div className="empty-timeline-card">
+                   <p className="empty-timeline">Nenhum desafio publicado ainda. Seja o primeiro!</p>
+                 </div>
                ) : (
                  posts.filter(p => !p.parentId).map(post => {
                    const replies = posts.filter(p => String(p.parentId) === String(post.id));
                    return (
-                     <div key={post.id} className="post-card">
+                     <div key={post.id} className={`post-card ${post.pendingSync ? 'post-pending' : ''}`}>
                        <div className="post-header">
                          <div className="author-info">
-                           <div className="avatar">{post.author.name.charAt(0).toUpperCase()}</div>
+                           <div className="avatar">{post.author?.name ? post.author.name.charAt(0).toUpperCase() : '?'}</div>
                            <div className="author-details">
-                             <strong>{post.author.name}</strong>
+                             <div className="author-name-row">
+                               <strong>{post.author?.name || 'Anônimo'}</strong>
+                               {post.pendingSync && (
+                                 <span className="badge-pending-sync" title="Este item está salvo no seu dispositivo e será sincronizado quando houver conexão">
+                                   ⏳ Pendente de envio
+                                 </span>
+                               )}
+                             </div>
                              <span className="timestamp">{new Date(post.timestamp).toLocaleString()}</span>
                            </div>
                          </div>
@@ -501,11 +783,16 @@ function App() {
                          {replies.length > 0 && (
                            <div className="replies-list">
                              {replies.map(reply => (
-                               <div key={reply.id} className="reply-card">
+                               <div key={reply.id} className={`reply-card ${reply.pendingSync ? 'reply-pending' : ''}`}>
                                  <div className="reply-author">
-                                   <div className="avatar avatar-sm">{reply.author.name.charAt(0).toUpperCase()}</div>
+                                   <div className="avatar avatar-sm">{reply.author?.name ? reply.author.name.charAt(0).toUpperCase() : '?'}</div>
                                    <div className="author-details">
-                                     <strong>{reply.author.name}</strong>
+                                     <div className="author-name-row">
+                                       <strong>{reply.author?.name || 'Anônimo'}</strong>
+                                       {reply.pendingSync && (
+                                         <span className="badge-pending-sync-sm">⏳ Pendente</span>
+                                       )}
+                                     </div>
                                      <span className="timestamp">{new Date(reply.timestamp).toLocaleString()}</span>
                                    </div>
                                  </div>
@@ -541,7 +828,7 @@ function App() {
                            <form className="reply-form" onSubmit={(e) => handleCreateReply(e, post.id)}>
                              <textarea
                                className="post-input reply-input"
-                               placeholder="Escreva sua resposta ao desafio..."
+                               placeholder={isOnline ? "Escreva sua resposta ao desafio..." : "Escreva sua resposta (será salva offline)..."}
                                value={replyText}
                                onChange={(e) => setReplyText(e.target.value)}
                              />
@@ -560,7 +847,9 @@ function App() {
                                  <button type="button" className="btn-secondary">📷 Foto/Vídeo</button>
                                  <input type="file" accept="image/*,video/*" onChange={handleReplyMediaUpload} />
                                </div>
-                               <button type="submit" className="btn-primary reply-submit-btn">Enviar Resposta</button>
+                               <button type="submit" className="btn-primary reply-submit-btn">
+                                 {isOnline ? 'Enviar Resposta' : 'Salvar Resposta Offline'}
+                               </button>
                              </div>
                            </form>
                          )}
@@ -574,7 +863,7 @@ function App() {
         </div>
       )}
 
-      {/* Toast Configuration */}
+      {/* Toast Notifications */}
       <div className="toast-container">
         {toasts.map(toast => (
           <div key={toast.id} className={`toast ${toast.type}`}>
@@ -590,3 +879,4 @@ function App() {
 }
 
 export default App
+
