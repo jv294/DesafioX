@@ -244,7 +244,10 @@ function App() {
         body: JSON.stringify({ name, email, password })
       })
       
-      const data = await response.json()
+      const contentType = response.headers.get('content-type')
+      const data = contentType && contentType.includes('application/json')
+        ? await response.json()
+        : { error: `Erro ${response.status}: Servidor não retornou resposta válida.` }
       
       if (!response.ok) {
         addToast(data.error || 'Erro ao criar conta.', 'error')
@@ -261,7 +264,7 @@ function App() {
       setCurrentView('dashboard')
       addToast('Conta criada com sucesso! Bem-vindo.', 'success')
     } catch {
-      addToast('Erro no servidor ao tentar registrar.', 'error')
+      addToast('Falha ao conectar com o servidor. Verifique se o backend está rodando.', 'error')
     }
   }
 
@@ -295,7 +298,10 @@ function App() {
         body: JSON.stringify({ email, password })
       })
       
-      const data = await response.json()
+      const contentType = response.headers.get('content-type')
+      const data = contentType && contentType.includes('application/json')
+        ? await response.json()
+        : { error: `Erro ${response.status}: Servidor não retornou resposta válida.` }
       
       if (!response.ok) {
         addToast(data.error || 'E-mail ou senha incorretos.', 'error')
@@ -309,7 +315,7 @@ function App() {
       setCurrentView('dashboard')
       addToast('Login realizado com sucesso!', 'success')
     } catch {
-      addToast('Erro no servidor ao tentar logar.', 'error')
+      addToast('Falha ao conectar com o servidor. Verifique se o backend está rodando.', 'error')
     }
   }
 
