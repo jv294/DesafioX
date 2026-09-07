@@ -15,26 +15,34 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-const client = new MongoClient(MONGODB_URI || '');
-let usersCollection;
-let postsCollection;
-
-// Armazenar conexão ativa em cache no ciclo de vida da Serverless Function
-let isConnected = false;
+let client = null;
+let clientPromise = null;
+let usersCollection = null;
+let postsCollection = null;
 
 async function ensureDbConnected() {
-  if (!isConnected) {
-    if (!MONGODB_URI) {
-      throw new Error('MONGODB_URI não está definida nas variáveis de ambiente.');
-    }
-    console.log('Tentando conectar ao MongoDB Atlas...');
-    await client.connect();
-    const db = client.db(MONGODB_DBNAME);
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    throw new Error('MONGODB_URI não está configurada nas Variáveis de Ambiente da Vercel (Project Settings > Environment Variables).');
+  }
+
+  if (!client) {
+    client = new MongoClient(uri);
+    clientPromise = client.connect();
+  }
+
+  await clientPromise;
+
+  if (!usersCollection || !postsCollection) {
+    const dbName = process.env.MONGODB_DBNAME || 'app';
+    const db = client.db(dbName);
     usersCollection = db.collection('users');
     postsCollection = db.collection('posts');
-    await usersCollection.createIndex({ email: 1 }, { unique: true });
-    isConnected = true;
-    console.log('Conectado ao MongoDB Atlas com sucesso!');
+    try {
+      await usersCollection.createIndex({ email: 1 }, { unique: true });
+    } catch {
+      // Índice já existe ou ignorar erro transitório
+    }
   }
 }
 
@@ -45,7 +53,7 @@ app.use(async (req, res, next) => {
     next();
   } catch (err) {
     console.error('Erro de conexão com o banco de dados:', err);
-    res.status(500).json({ error: 'Erro ao conectar ao banco de dados: ' + err.message });
+    res.status(500).json({ error: 'Erro de conexão no servidor: ' + err.message });
   }
 });
 
