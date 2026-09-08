@@ -3,6 +3,7 @@ import QRCode from 'react-qr-code'
 import './App.css'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
+const MAX_RETRIES = 5
 
 // Helper to generate unique offline IDs safely
 function generateTempId(prefix = 'offline') {
@@ -76,8 +77,22 @@ function App() {
   const [showPassword, setShowPassword] = useState(false)
   const [showQR, setShowQR] = useState(false)
 
+  const addToOfflineQueue = useCallback((payload, type = 'post') => {
+    const tempId = generateTempId(`offline_${type}`)
+    setOfflineQueue(prev => [...prev, { tempId, type, payload, timestamp: Date.now() }])
+
+    const localItem = {
+      ...payload,
+      id: tempId,
+      pendingSync: true,
+    }
+    setPosts(prev => [localItem, ...prev])
+    addToast(`Modo Offline: ${type === 'post' ? 'Desafio' : 'Resposta'} salvo localmente. Será enviado ao reconectar.`, 'warning')
+  }, [currentUser, addToast])
+
   // References to avoid stale closures in listeners
   const offlineQueueRef = useRef(offlineQueue)
+  const isSyncingRef = useRef(false)
   useEffect(() => {
     offlineQueueRef.current = offlineQueue
     try {
@@ -118,47 +133,72 @@ function App() {
     }, 4500)
   }, [removeToast])
 
-  // Sync Offline Queue
+    // Sync Offline Queue
   const syncOfflineQueue = useCallback(async () => {
-    const currentQueue = offlineQueueRef.current
-    if (currentQueue.length === 0 || !navigator.onLine) return
+    const currentQueue = offlineQueueRef.current;
+    if (currentQueue.length === 0 || !navigator.onLine || isSyncingRef.current) return;
 
-    setIsSyncing(true)
-    let successCount = 0
-    const remainingQueue = []
+    isSyncingRef.current = true;
+    setIsSyncing(true);
 
-    for (const item of currentQueue) {
+    const queueCopy = [...currentQueue];
+    const remaining = [];
+    const failed = [];
+    let updatedPosts = [...posts]; // cópia para aplicar em lote
+
+    for (const item of queueCopy) {
       try {
         const response = await fetch(`${API_URL}/api/posts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(item.payload)
-        })
+          body: JSON.stringify(item.payload),
+        });
 
         if (response.ok) {
-          const serverPost = await response.json()
-          successCount++
-          setPosts(prev => prev.map(p => (p.id === item.tempId ? serverPost : p)))
+          const serverPost = await response.json();
+          // Atualiza na cópia (não no estado diretamente)
+          updatedPosts = updatedPosts.map(p => (p.id === item.tempId ? serverPost : p));
         } else {
-          remainingQueue.push(item)
+          // Incrementa tentativas
+          const updatedItem = { ...item, retries: (item.retries || 0) + 1 };
+          if (updatedItem.retries >= MAX_RETRIES) {
+            failed.push(updatedItem);
+          } else {
+            remaining.push(updatedItem);
+          }
         }
       } catch (err) {
-        console.error('Erro ao sincronizar item offline:', err)
-        remainingQueue.push(item)
+        console.error('Erro ao sincronizar:', err);
+        const updatedItem = { ...item, retries: (item.retries || 0) + 1 };
+        if (updatedItem.retries >= MAX_RETRIES) {
+          failed.push(updatedItem);
+        } else {
+          remaining.push(updatedItem);
+        }
       }
     }
 
-    setOfflineQueue(remainingQueue)
-    setIsSyncing(false)
+  // Aplica todas as atualizações de uma vez
+  setPosts(updatedPosts);
+  setOfflineQueue(remaining);
+  setIsSyncing(false);
+  isSyncingRef.current = false;
 
-    if (successCount > 0) {
-      addToast(`Sincronização concluída! ${successCount} item(ns) enviado(s) com sucesso.`, 'success')
-    }
-  }, [addToast])
+  const successCount = queueCopy.length - remaining.length - failed.length;
+  if (successCount > 0) {
+    addToast(`✅ ${successCount} item(ns) sincronizados.`, 'success');
+  }
+  if (failed.length > 0) {
+    // Armazena falhas permanentes
+    localStorage.setItem('desafiox_failed_queue', JSON.stringify(failed));
+    addToast(`⚠️ ${failed.length} item(ns) falharam permanentemente. Verifique e tente novamente.`, 'error');
+  }
+}, [posts, offlineQueue, addToast]); // inclua as dependências
 
   // Listen for online / offline network events and fetch initial data
   useEffect(() => {
     let isMounted = true
+    let onlineTimeout
 
     const loadData = async () => {
       if (!navigator.onLine) return
@@ -194,15 +234,19 @@ function App() {
     }
 
     const handleOnline = () => {
-      setIsOnline(true)
-      addToast('Conexão restabelecida! Você está online.', 'success')
-      loadData()
-      syncOfflineQueue()
+      clearTimeout(onlineTimeout)
+      onlineTimeout = setTimeout(() => {
+        setIsOnline(true);
+        addToast('Conexão restabelecida! Você está online.', 'success');
+        loadData();
+        syncOfflineQueue()
+      }, 300)
     }
 
     const handleOffline = () => {
-      setIsOnline(false)
-      addToast('Conexão perdida. O aplicativo continuará funcionando no modo offline.', 'warning')
+      clearTimeout(onlineTimeout)
+      setIsOnline(false);
+      addToast('Conexão perdida. O aplicativo continuará funcionando no modo offline.', 'warning');
     }
 
     window.addEventListener('online', handleOnline)
@@ -212,6 +256,7 @@ function App() {
 
     return () => {
       isMounted = false
+      clearTimeout(onlineTimeout)
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
@@ -382,16 +427,8 @@ function App() {
     setTaggedUsers([])
 
     if (!navigator.onLine) {
-      const tempId = generateTempId('offline_post')
-      const localPost = {
-        ...newPostData,
-        id: tempId,
-        pendingSync: true
-      }
-
-      setPosts(prev => [localPost, ...prev])
-      setOfflineQueue(prev => [...prev, { tempId, type: 'post', payload: newPostData }])
-      addToast('Modo Offline: Desafio salvo localmente. Ele será enviado automaticamente ao reconectar!', 'warning')
+      addToOfflineQueue(newPostData) // ← use a função unificada
+      addToast('Modo Offline: Desafio salvo localmente...', 'warning')
       return
     }
 
@@ -411,14 +448,7 @@ function App() {
       setPosts(prev => [data, ...prev])
       addToast('Desafio publicado com sucesso!', 'success')
     } catch {
-      const tempId = generateTempId('offline_post')
-      const localPost = {
-        ...newPostData,
-        id: tempId,
-        pendingSync: true
-      }
-      setPosts(prev => [localPost, ...prev])
-      setOfflineQueue(prev => [...prev, { tempId, type: 'post', payload: newPostData }])
+      addToOfflineQueue(newPostData, 'post')
       addToast('Sem conexão. O desafio foi guardado na fila offline e será enviado ao reconectar.', 'warning')
     }
   }
@@ -446,14 +476,7 @@ function App() {
     setActiveReplyId(null)
 
     if (!navigator.onLine) {
-      const tempId = generateTempId('offline_reply')
-      const localReply = {
-        ...replyData,
-        id: tempId,
-        pendingSync: true
-      }
-      setPosts(prev => [localReply, ...prev])
-      setOfflineQueue(prev => [...prev, { tempId, type: 'reply', payload: replyData }])
+      addToOfflineQueue(replyData, 'reply')
       addToast('Modo Offline: Resposta salva localmente. Será enviada assim que reconectar!', 'warning')
       return
     }
@@ -474,14 +497,7 @@ function App() {
       setPosts(prev => [data, ...prev])
       addToast('Resposta enviada!', 'success')
     } catch {
-      const tempId = generateTempId('offline_reply')
-      const localReply = {
-        ...replyData,
-        id: tempId,
-        pendingSync: true
-      }
-      setPosts(prev => [localReply, ...prev])
-      setOfflineQueue(prev => [...prev, { tempId, type: 'reply', payload: replyData }])
+      addToOfflineQueue(replyData, 'reply')
       addToast('Falha na rede. Resposta guardada offline e será sincronizada automaticamente.', 'warning')
     }
   }
