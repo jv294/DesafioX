@@ -14,15 +14,21 @@ function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const loggedInUser = localStorage.getItem('currentUser')
-      return loggedInUser ? JSON.parse(loggedInUser) : null
+      return loggedInUser && loggedInUser !== 'undefined' ? JSON.parse(loggedInUser) : null
     } catch {
+      localStorage.removeItem('currentUser')
       return null
     }
   })
 
   const [currentView, setCurrentView] = useState(() => {
-    const loggedInUser = localStorage.getItem('currentUser')
-    return loggedInUser ? 'dashboard' : 'login'
+    try {
+      const loggedInUser = localStorage.getItem('currentUser')
+      const user = loggedInUser && loggedInUser !== 'undefined' ? JSON.parse(loggedInUser) : null
+      return user ? 'dashboard' : 'login'
+    } catch {
+      return 'login'
+    }
   })
 
   // Network & Offline Status
@@ -77,6 +83,19 @@ function App() {
   const [showPassword, setShowPassword] = useState(false)
   const [showQR, setShowQR] = useState(false)
 
+  const removeToast = useCallback((id) => {
+    setToasts(prev => prev.filter(toast => toast.id !== id))
+  }, [])
+
+  const addToast = useCallback((message, type = 'info') => {
+    const id = generateTempId('toast')
+    setToasts(prev => [...prev, { id, message, type }])
+    
+    setTimeout(() => {
+      removeToast(id)
+    }, 4500)
+  }, [removeToast])
+
   const addToOfflineQueue = useCallback((payload, type = 'post') => {
     const tempId = generateTempId(`offline_${type}`)
     setOfflineQueue(prev => [...prev, { tempId, type, payload, timestamp: Date.now() }])
@@ -88,7 +107,7 @@ function App() {
     }
     setPosts(prev => [localItem, ...prev])
     addToast(`Modo Offline: ${type === 'post' ? 'Desafio' : 'Resposta'} salvo localmente. Será enviado ao reconectar.`, 'warning')
-  }, [currentUser, addToast])
+  }, [addToast])
 
   // References to avoid stale closures in listeners
   const offlineQueueRef = useRef(offlineQueue)
@@ -120,20 +139,7 @@ function App() {
     }
   }, [users])
 
-  const removeToast = useCallback((id) => {
-    setToasts(prev => prev.filter(toast => toast.id !== id))
-  }, [])
-
-  const addToast = useCallback((message, type = 'info') => {
-    const id = generateTempId('toast')
-    setToasts(prev => [...prev, { id, message, type }])
-    
-    setTimeout(() => {
-      removeToast(id)
-    }, 4500)
-  }, [removeToast])
-
-    // Sync Offline Queue
+  // Sync Offline Queue
   const syncOfflineQueue = useCallback(async () => {
     const currentQueue = offlineQueueRef.current;
     if (currentQueue.length === 0 || !navigator.onLine || isSyncingRef.current) return;
@@ -144,7 +150,6 @@ function App() {
     const queueCopy = [...currentQueue];
     const remaining = [];
     const failed = [];
-    let updatedPosts = [...posts]; // cópia para aplicar em lote
 
     for (const item of queueCopy) {
       try {
@@ -156,10 +161,8 @@ function App() {
 
         if (response.ok) {
           const serverPost = await response.json();
-          // Atualiza na cópia (não no estado diretamente)
-          updatedPosts = updatedPosts.map(p => (p.id === item.tempId ? serverPost : p));
+          setPosts(prev => prev.map(p => (p.id === item.tempId ? serverPost : p)));
         } else {
-          // Incrementa tentativas
           const updatedItem = { ...item, retries: (item.retries || 0) + 1 };
           if (updatedItem.retries >= MAX_RETRIES) {
             failed.push(updatedItem);
@@ -178,22 +181,19 @@ function App() {
       }
     }
 
-  // Aplica todas as atualizações de uma vez
-  setPosts(updatedPosts);
-  setOfflineQueue(remaining);
-  setIsSyncing(false);
-  isSyncingRef.current = false;
+    setOfflineQueue(remaining);
+    setIsSyncing(false);
+    isSyncingRef.current = false;
 
-  const successCount = queueCopy.length - remaining.length - failed.length;
-  if (successCount > 0) {
-    addToast(`✅ ${successCount} item(ns) sincronizados.`, 'success');
-  }
-  if (failed.length > 0) {
-    // Armazena falhas permanentes
-    localStorage.setItem('desafiox_failed_queue', JSON.stringify(failed));
-    addToast(`⚠️ ${failed.length} item(ns) falharam permanentemente. Verifique e tente novamente.`, 'error');
-  }
-}, [posts, offlineQueue, addToast]); // inclua as dependências
+    const successCount = queueCopy.length - remaining.length - failed.length;
+    if (successCount > 0) {
+      addToast(`✅ ${successCount} item(ns) sincronizados.`, 'success');
+    }
+    if (failed.length > 0) {
+      localStorage.setItem('desafiox_failed_queue', JSON.stringify(failed));
+      addToast(`⚠️ ${failed.length} item(ns) falharam permanentemente. Verifique e tente novamente.`, 'error');
+    }
+  }, [addToast]);
 
   // Listen for online / offline network events and fetch initial data
   useEffect(() => {
@@ -537,7 +537,7 @@ function App() {
         </div>
       </div>
 
-      {currentView === 'login' && (
+      {(currentView === 'login' || (!currentUser && currentView !== 'register')) && (
         <div className="app-container">
           <div className="header">
             <div className="app-logo-badge">
