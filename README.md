@@ -101,12 +101,10 @@ O Desafio X é uma rede social que permite aos usuários compartilhar fotos, ví
 
 1. Adaptação para o usuário.
 2. Proibição de postagem ofensiva, nociva e toxica.
-3. Bloquear acesso de menores de idade.
 
 ## Funcionalidades a serem desenvolvidas
 
 * Melhorar perfil do usuário.
-* Restrição de idade no cadastro.
 * Sistema de Progresso e XP.
 * Centralizar as configurações de estilo.
 * Personaliza o perfil do usuário.
