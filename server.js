@@ -57,17 +57,41 @@ async function startServer() {
 
 startServer();
 
+function calculateAge(birthDate) {
+  const [year, month, day] = birthDate.split('-').map(Number);
+  const today = new Date();
+  let age = today.getFullYear() - year;
+
+  const birthdayNotReached = 
+  today.getMonth() + 1 < month ||
+  (today.getMonth() + 1 === month && today.getDate() < day);
+
+  if (birthdayNotReached) {
+    age--;
+  }
+  return age;
+}
+
 // Register User
 app.post('/api/register', async (req, res) => {
-  const { name, email, password } = req.body;
-  if (!name || !email || !password) {
+  const { name, email, password, birthDate } = req.body;
+  if (!name || !email || !password || !birthDate) {
     return res.status(400).json({ error: 'Por favor, preencha todos os campos.' });
+  }
+
+  const age = calculateAge(birthDate);
+  if (age < 18) {
+    return res.status(400).json({ error: 'Você deve ter pelo menos 18 anos para se registrar.' });
+  }
+
+  if (age > 120){
+    return res.status(400).json({ error: 'Idade inválida. Por favor, insira uma data de nascimento válida.' });
   }
 
   try {
     // Gerar hash seguro da senha antes de persistir
     const hashedPassword = await bcrypt.hash(password, 10);
-    const result = await usersCollection.insertOne({ name, email, password: hashedPassword });
+    const result = await usersCollection.insertOne({ name, email, password: hashedPassword, birthDate });
     res.status(201).json({ id: result.insertedId, name, email });
   } catch (err) {
     if (err.code === 11000) {

@@ -79,6 +79,7 @@ function App() {
   // Input states
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [birthDate, setBirthDate] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [showQR, setShowQR] = useState(false)
@@ -266,52 +267,104 @@ function App() {
     setName('')
     setEmail('')
     setPassword('')
+    setBirthDate('')
     setShowPassword(false)
   }
 
-  const handleRegister = async (e) => {
-    e.preventDefault()
-    
-    if (!name || !email || !password) {
-      addToast('Por favor, preencha todos os campos.', 'error')
-      return
-    }
+  const calculateAge = (birthDate) => {
+  const [year, month, day] = birthDate.split('-').map(Number)
 
-    if (!isOnline) {
-      addToast('Cadastro requer conexão com a internet. Conecte-se e tente novamente.', 'warning')
-      return
-    }
+  const today = new Date()
 
-    try {
-      const response = await fetch(`${API_URL}/api/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password })
-      })
-      
-      const contentType = response.headers.get('content-type')
-      const data = contentType && contentType.includes('application/json')
-        ? await response.json()
-        : { error: `Erro ${response.status}: Servidor não retornou resposta válida.` }
-      
-      if (!response.ok) {
-        addToast(data.error || 'Erro ao criar conta.', 'error')
-        return
-      }
-      
-      const newUser = { id: data.id, name: data.name, email: data.email }
-      
-      setUsers(prev => [...prev, newUser])
-      setCurrentUser(newUser)
-      localStorage.setItem('currentUser', JSON.stringify(newUser))
-      
-      clearForm()
-      setCurrentView('dashboard')
-      addToast('Conta criada com sucesso! Bem-vindo.', 'success')
-    } catch {
-      addToast('Falha ao conectar com o servidor. Verifique se o backend está rodando.', 'error')
-    }
+  let age = today.getFullYear() - year
+
+  const birthdayNotReached =
+    today.getMonth() + 1 < month ||
+    (today.getMonth() + 1 === month && today.getDate() < day)
+
+  if (birthdayNotReached) {
+    age--
   }
+
+  return age
+}
+
+const handleRegister = async (e) => {
+  e.preventDefault()
+
+  if (!name || !email || !password) {
+    addToast('Por favor, preencha todos os campos.', 'error')
+    return
+  }
+
+  if (!birthDate) {
+    addToast('Por favor, informe sua data de nascimento.', 'error')
+    return
+  }
+
+  const age = calculateAge(birthDate)
+
+  if (age < 18) {
+    addToast('Você deve ter pelo menos 18 anos para se registrar.', 'error')
+    return
+  }
+
+  if (!isOnline) {
+    addToast(
+      'Cadastro requer conexão com a internet. Conecte-se e tente novamente.',
+      'warning'
+    )
+    return
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/api/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name,
+        email,
+        password,
+        birthDate
+      })
+    })
+
+    const contentType = response.headers.get('content-type')
+
+    const data = contentType && contentType.includes('application/json')
+      ? await response.json()
+      : {
+          error: `Erro ${response.status}: Servidor não retornou resposta válida.`
+        }
+
+    if (!response.ok) {
+      addToast(data.error || 'Erro ao criar conta.', 'error')
+      return
+    }
+
+    const newUser = {
+      id: data.id,
+      name: data.name,
+      email: data.email
+    }
+
+    setUsers(prev => [...prev, newUser])
+    setCurrentUser(newUser)
+    localStorage.setItem('currentUser', JSON.stringify(newUser))
+
+    clearForm()
+    setCurrentView('dashboard')
+
+    addToast('Conta criada com sucesso! Bem-vindo.', 'success')
+  } catch {
+    addToast(
+      'Falha ao conectar com o servidor. Verifique se o backend está rodando.',
+      'error'
+    )
+  }
+}
 
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -557,6 +610,7 @@ function App() {
                 onChange={(e) => setEmail(e.target.value)}
               />
             </div>
+            
             <div className="form-group">
               <label>Senha</label>
               <div className="password-wrapper">
@@ -631,6 +685,16 @@ function App() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
+            </div>
+            <div className="form-group">
+        <label>Data de Nascimento</label>
+        <input
+        type="date"
+        value={birthDate}
+        onChange={(e) => setBirthDate(e.target.value)}
+        required
+        />
+<small>Você deve ter pelo menos 18 anos para se registrar.</small>
             </div>
             <div className="form-group">
               <label>Senha</label>
