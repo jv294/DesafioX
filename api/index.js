@@ -21,17 +21,30 @@ let usersCollection = null;
 let postsCollection = null;
 
 async function ensureDbConnected() {
-  const uri = process.env.MONGODB_URI;
+  const rawUri = process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGODB_URL || process.env.DATABASE_URL;
+  const uri = rawUri ? rawUri.trim() : null;
+  
   if (!uri) {
-    throw new Error('MONGODB_URI não está configurada nas Variáveis de Ambiente da Vercel (Project Settings > Environment Variables).');
+    throw new Error('MONGODB_URI não está configurada nas Variáveis de Ambiente da Vercel. Adicione em Project Settings > Environment Variables e faça um Redeploy.');
   }
 
   if (!client) {
     client = new MongoClient(uri);
-    clientPromise = client.connect();
+    clientPromise = client.connect().catch(err => {
+      // Se a conexão falhar, reseta o client para permitir novas tentativas
+      client = null;
+      clientPromise = null;
+      throw err;
+    });
   }
 
-  await clientPromise;
+  try {
+    await clientPromise;
+  } catch (err) {
+    client = null;
+    clientPromise = null;
+    throw new Error('Falha ao conectar no MongoDB Atlas: ' + err.message + ' (Verifique se o usuário/senha estão corretos e se o IP 0.0.0.0/0 está liberado no Network Access)');
+  }
 
   if (!usersCollection || !postsCollection) {
     const dbName = process.env.MONGODB_DBNAME || 'app';
@@ -53,7 +66,7 @@ app.use(async (req, res, next) => {
     next();
   } catch (err) {
     console.error('Erro de conexão com o banco de dados:', err);
-    res.status(500).json({ error: 'Erro de conexão no servidor: ' + err.message });
+    res.status(500).json({ error: 'Erro no servidor: ' + err.message });
   }
 });
 
