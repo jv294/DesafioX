@@ -10,6 +10,17 @@ function generateTempId(prefix = 'offline') {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
 }
 
+function Icon({ name, filled = false, className = '' }) {
+  return (
+    <span
+      className={`material-symbols-outlined ${className}`}
+      style={filled ? { fontVariationSettings: "'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 24" } : undefined}
+    >
+      {name}
+    </span>
+  )
+}
+
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -83,6 +94,7 @@ function App() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [showQR, setShowQR] = useState(false)
+  const [feedFilter, setFeedFilter] = useState('all')
 
   const removeToast = useCallback((id) => {
     setToasts(prev => prev.filter(toast => toast.id !== id))
@@ -188,11 +200,11 @@ function App() {
 
     const successCount = queueCopy.length - remaining.length - failed.length;
     if (successCount > 0) {
-      addToast(`✅ ${successCount} item(ns) sincronizados.`, 'success');
+      addToast(`âœ… ${successCount} item(ns) sincronizados.`, 'success');
     }
     if (failed.length > 0) {
       localStorage.setItem('desafiox_failed_queue', JSON.stringify(failed));
-      addToast(`⚠️ ${failed.length} item(ns) falharam permanentemente. Verifique e tente novamente.`, 'error');
+      addToast(`âš ï¸ ${failed.length} item(ns) falharam permanentemente. Verifique e tente novamente.`, 'error');
     }
   }, [addToast]);
 
@@ -480,8 +492,9 @@ const handleRegister = async (e) => {
     setTaggedUsers([])
 
     if (!navigator.onLine) {
-      addToOfflineQueue(newPostData) // ← use a função unificada
+      addToOfflineQueue(newPostData)
       addToast('Modo Offline: Desafio salvo localmente...', 'warning')
+      setCurrentView('dashboard')
       return
     }
 
@@ -500,9 +513,11 @@ const handleRegister = async (e) => {
 
       setPosts(prev => [data, ...prev])
       addToast('Desafio publicado com sucesso!', 'success')
+      setCurrentView('dashboard')
     } catch {
       addToOfflineQueue(newPostData, 'post')
       addToast('Sem conexão. O desafio foi guardado na fila offline e será enviado ao reconectar.', 'warning')
+      setCurrentView('dashboard')
     }
   }
 
@@ -557,408 +572,526 @@ const handleRegister = async (e) => {
 
   const switchView = (view) => {
     clearForm()
+    setShowQR(false)
     setCurrentView(view)
   }
 
+  const openAppView = (view) => {
+    setCurrentView(view)
+    setActiveReplyId(null)
+  }
+
+  const comingSoon = (area) => {
+    addToast(`${area} entra nas próximas atualizações. Por enquanto use o feed e o criar desafio.`, 'info')
+  }
+
+  const parentPosts = posts.filter(p => !p.parentId)
+  const visiblePosts = parentPosts.filter(post => {
+    if (feedFilter === 'mine') return post.author?.email === currentUser?.email
+    if (feedFilter === 'media') return Boolean(post.media)
+    return true
+  })
+
+  const telemetryLabel = isSyncing ? 'Sincronizando' : isOnline ? 'Online' : 'Offline'
+  const isAppView = Boolean(currentUser)
+
   return (
-    <>
-      {/* Global Status Bar / Indicator */}
-      <div className={`status-indicator-bar ${isOnline ? 'status-online' : 'status-offline'}`}>
-        <div className="status-indicator-content">
-          <span className={`status-dot ${isOnline ? 'dot-online' : 'dot-offline'} ${isSyncing ? 'dot-syncing' : ''}`}></span>
-          <span className="status-label">
-            {isSyncing ? (
-              <>Sincronizando dados...</>
-            ) : isOnline ? (
-              <>Online</>
-            ) : (
-              <>Modo Offline (dados salvos localmente)</>
-            )}
-          </span>
+    <div className="app-root">
+      <div className={`phone-frame ${isAppView ? 'app-frame' : 'auth-frame'}`}>
+        <div className="ambient ambient-a" />
+        <div className="ambient ambient-b" />
 
-          {offlineQueue.length > 0 && (
-            <span className="pending-badge">
-              {offlineQueue.length} {offlineQueue.length === 1 ? 'pendência' : 'pendências'}
-            </span>
-          )}
-
-          {isOnline && offlineQueue.length > 0 && !isSyncing && (
-            <button type="button" className="btn-sync-now" onClick={syncOfflineQueue}>
-              Sincronizar agora
-            </button>
-          )}
-        </div>
-      </div>
-
-      {(currentView === 'login' || (!currentUser && currentView !== 'register')) && (
-        <div className="app-container">
-          <div className="header">
-            <div className="app-logo-badge">
-              <span className="logo-sparkle">✦</span> Desafio X
-            </div>
-            <h2>Bem-vindo de volta</h2>
-            <p>Faça login para acessar sua conta</p>
-          </div>
-
-          <form onSubmit={handleLogin}>
-            <div className="form-group">
-              <label>Endereço de E-mail</label>
-              <input 
-                type="email" 
-                placeholder="seu@email.com" 
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            
-            <div className="form-group">
-              <label>Senha</label>
-              <div className="password-wrapper">
-                <input 
-                  type={showPassword ? "text" : "password"} 
-                  placeholder="••••••••" 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <button 
-                  type="button" 
-                  className="toggle-password"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? "Ocultar" : "Ver"}
-                </button>
-              </div>
-            </div>
-            <button type="submit" className="btn-primary">Entrar</button>
-          </form>
-
-          <div className="switch-mode">
-            Ainda não tem uma conta? 
-            <button type="button" onClick={() => switchView('register')}>Cadastre-se</button>
-            
-            <br/><br/>
-            <button type="button" onClick={() => setShowQR(!showQR)} className="btn-secondary" style={{fontSize: '13px', padding: '10px 16px', display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer'}}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
-              Escanear QR Code
-            </button>
-            
-            {showQR && (
-              <div style={{ background: 'white', padding: '20px', borderRadius: '16px', margin: '20px auto 0', width: 'fit-content', boxShadow: '0 4px 20px rgba(0,0,0,0.5)', animation: 'slideUp 0.3s ease-out' }}>
-                <QRCode 
-                  value={window.location.origin + window.location.pathname}
-                  size={180} 
-                />
-                <p style={{color: '#0f172a', fontSize: '14px', marginTop: '16px', fontWeight: '600', marginBottom: '0'}}>
-                  Aponte a câmera para<br/>instalar o app
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {currentView === 'register' && (
-        <div className="app-container">
-          <div className="header">
-            <div className="app-logo-badge">
-              <span className="logo-sparkle">✦</span> Desafio X
-            </div>
-            <h2>Criar Conta</h2>
-            <p>Junte-se a nós hoje mesmo</p>
-          </div>
-
-          <form onSubmit={handleRegister}>
-            <div className="form-group">
-              <label>Nome Completo</label>
-              <input 
-                type="text" 
-                placeholder="Seu nome" 
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label>Endereço de E-mail</label>
-              <input 
-                type="email" 
-                placeholder="seu@email.com" 
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-        <label>Data de Nascimento</label>
-        <input
-        type="date"
-        value={birthDate}
-        onChange={(e) => setBirthDate(e.target.value)}
-        required
-        />
-<small>Você deve ter pelo menos 18 anos para se registrar.</small>
-            </div>
-            <div className="form-group">
-              <label>Senha</label>
-              <div className="password-wrapper">
-                <input 
-                  type={showPassword ? "text" : "password"} 
-                  placeholder="Crie uma senha forte" 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <button 
-                  type="button" 
-                  className="toggle-password"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? "Ocultar" : "Ver"}
-                </button>
-              </div>
-            </div>
-            <button type="submit" className="btn-primary">Cadastrar</button>
-          </form>
-
-          <div className="switch-mode">
-            Já tem uma conta? 
-            <button type="button" onClick={() => switchView('login')}>Faça Login</button>
-          </div>
-        </div>
-      )}
-
-      {currentView === 'dashboard' && currentUser && (
-        <div className="app-container dashboard-container">
-          <div className="dashboard-nav">
-            <div className="dashboard-brand">
-              <h1>Desafio X</h1>
-              <div className={`nav-status-pill ${isOnline ? 'pill-online' : 'pill-offline'}`}>
-                <span className={`status-dot-mini ${isOnline ? 'dot-online' : 'dot-offline'}`}></span>
+        {!currentUser && (currentView === 'login' || currentView !== 'register') && (
+          <section className="auth-screen login-screen">
+            <header className="auth-top">
+              <div className={`telemetry ${isOnline ? 'on' : 'off'}`}>
+                <span className={`status-dot ${isOnline ? 'dot-online' : 'dot-offline'}`}></span>
                 <span>{isOnline ? 'Online' : 'Offline'}</span>
               </div>
+            </header>
+
+            <div className="auth-body login-body">
+              <div className="login-hero">
+                <div className="login-brand">
+                  <span className="logo-mark glow"><Icon name="bolt" filled /></span>
+                  <h1 className="login-title">
+                    DESAFIO <span>X</span>
+                  </h1>
+                </div>
+                <h2>Entre na Arena</h2>
+                <p>Lance desafios, acompanhe o feed e responda a galera.</p>
+              </div>
+
+              <form className="auth-form" onSubmit={handleLogin}>
+                <label className="field">
+                  <span>E-mail</span>
+                  <div className="arena-input">
+                    <Icon name="alternate_email" />
+                    <input
+                      type="email"
+                      placeholder="seu@email.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      autoComplete="username"
+                    />
+                  </div>
+                </label>
+
+                <label className="field">
+                  <span>Senha</span>
+                  <div className="arena-input">
+                    <Icon name="lock" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      autoComplete="current-password"
+                    />
+                    <button type="button" className="icon-btn" onClick={() => setShowPassword(!showPassword)} aria-label="Mostrar senha">
+                      <Icon name={showPassword ? 'visibility_off' : 'visibility'} />
+                    </button>
+                  </div>
+                </label>
+
+                <div className="auth-meta">
+                  <span className="secure-chip">
+                    <Icon name="verified_user" filled /> Sessão segura
+                  </span>
+                </div>
+
+                <button type="submit" className="btn-primary btn-fire">
+                  Entrar <Icon name="bolt" filled />
+                </button>
+              </form>
+
+              <div className="auth-divider">
+                <span>ou continue com</span>
+              </div>
+
+              <button type="button" className="btn-secondary qr-trigger" onClick={() => setShowQR(!showQR)}>
+                <Icon name="qr_code_scanner" />
+                {showQR ? 'Ocultar QR Code' : 'Escanear QR Code'}
+              </button>
+
+              {showQR && (
+                <div className="qr-panel">
+                  <QRCode value={window.location.origin + window.location.pathname} size={180} />
+                  <p>Aponte a câmera para<br />instalar o app</p>
+                </div>
+              )}
             </div>
-            <div className="dashboard-user-info">
-              <span className="user-welcome">Olá, <strong>{currentUser.name}</strong></span>
-              <button onClick={handleLogout} className="btn-primary btn-danger">Sair</button>
+
+            <footer className="auth-foot login-foot">
+              <p className="switch-mode">
+                Ainda não tem conta?
+                <button type="button" onClick={() => switchView('register')}>Cadastre-se</button>
+              </p>
+              <div className="legal-row">
+                <span className="age-badge">18+</span>
+                <span>Apenas para maiores de 18 anos</span>
+              </div>
+            </footer>
+          </section>
+        )}
+
+        {!currentUser && currentView === 'register' && (
+          <section className="auth-screen register-screen">
+            <header className="auth-top">
+              <div className={`telemetry ${isOnline ? 'on' : 'off'}`}>
+                <span className={`status-dot ${isOnline ? 'dot-online' : 'dot-offline'}`}></span>
+                <span>{isOnline ? 'Online' : 'Offline'}</span>
+              </div>
+              <button type="button" className="text-link" onClick={() => switchView('login')}>
+                <Icon name="arrow_back" /> Entrar
+              </button>
+            </header>
+
+            <div className="auth-body">
+              <div className="brand-lockup">
+                <span className="logo-mark glow"><Icon name="bolt" filled /></span>
+                <span className="logo-wordmark">DESAFIO X</span>
+              </div>
+              <h1>Crie sua Conta</h1>
+              <p className="auth-subtitle">Entre na arena, publique desafios e responda no feed.</p>
+
+              <div className="age-banner">
+                <span className="age-badge">18+</span>
+                Cadastro permitido apenas para maiores de 18 anos.
+              </div>
+
+              <form className="auth-form" onSubmit={handleRegister}>
+                <label className="field">
+                  <span>Nome completo</span>
+                  <div className="arena-input">
+                    <Icon name="person" />
+                    <input
+                      type="text"
+                      placeholder="Seu nome ou como quer ser chamado"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </div>
+                </label>
+
+                <label className="field">
+                  <span>E-mail</span>
+                  <div className="arena-input">
+                    <Icon name="mail" />
+                    <input
+                      type="email"
+                      placeholder="seu@email.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </div>
+                </label>
+
+                <label className="field">
+                  <span>Data de nascimento</span>
+                  <div className="arena-input">
+                    <Icon name="calendar_today" />
+                    <input
+                      type="date"
+                      value={birthDate}
+                      onChange={(e) => setBirthDate(e.target.value)}
+                      required
+                    />
+                  </div>
+                </label>
+
+                <label className="field">
+                  <span>Senha de acesso</span>
+                  <div className="arena-input">
+                    <Icon name="key" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Crie uma senha segura"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                    />
+                    <button type="button" className="icon-btn" onClick={() => setShowPassword(!showPassword)} aria-label="Mostrar senha">
+                      <Icon name={showPassword ? 'visibility_off' : 'visibility'} />
+                    </button>
+                  </div>
+                </label>
+
+                <button type="submit" className="btn-primary btn-fire">
+                  Cadastrar <Icon name="arrow_forward" />
+                </button>
+              </form>
+
+              <p className="switch-mode">
+                Já tem uma conta?
+                <button type="button" onClick={() => switchView('login')}>Entrar</button>
+              </p>
             </div>
-          </div>
-          
-          <div className="feed-layout">
-             <div className="create-post-card">
-               <div className="create-post-header">
-                 <h3>Postar um Desafio</h3>
-                 {!isOnline && (
-                   <span className="offline-mode-tag">
-                     💾 Salvando localmente (offline)
-                   </span>
-                 )}
-               </div>
+          </section>
+        )}
+        {currentUser && (
+          <>
+            <header className="top-bar">
+              <div className="brand-lockup compact">
+                <span className="logo-mark"><Icon name="bolt" filled /></span>
+                <div>
+                  <span className="logo-wordmark">Desafio X</span>
+                  <span className="arena-caption">Arena de desafios</span>
+                </div>
+              </div>
+              <div className="top-bar-actions">
+                <div className={`telemetry ${isOnline ? 'on' : 'off'} ${isSyncing ? 'sync' : ''}`}>
+                  <span className={`status-dot ${isSyncing ? 'dot-syncing' : isOnline ? 'dot-online' : 'dot-offline'}`}></span>
+                  <span>{telemetryLabel}</span>
+                </div>
+                {offlineQueue.length > 0 && (
+                  <span className="pending-badge">{offlineQueue.length}</span>
+                )}
+                {isOnline && offlineQueue.length > 0 && !isSyncing && (
+                  <button type="button" className="btn-sync-now" onClick={syncOfflineQueue}>Sync</button>
+                )}
+              </div>
+            </header>
 
-               <form onSubmit={handleCreatePost}>
-                 <textarea
-                   className="post-input"
-                   placeholder={isOnline ? "Qual o seu desafio de hoje?" : "Qual o seu desafio de hoje? (será salvo offline)"}
-                   value={postText}
-                   onChange={(e) => setPostText(e.target.value)}
-                 />
-                 
-                 {postMedia && (
-                   <div className="media-preview">
-                     {postMediaType === 'video' ? (
-                       <video src={postMedia} controls />
-                     ) : (
-                       <img src={postMedia} alt="Preview" />
-                     )}
-                     <button type="button" onClick={() => {setPostMedia(null); setPostMediaType('')}}>Remover Mídia</button>
-                   </div>
-                 )}
+            <main className="app-main">
+              {(currentView === 'dashboard' || currentView === 'login') && (
+                <>
+                  <section className="filter-row" aria-label="Filtros do feed">
+                    <button type="button" className={`chip ${feedFilter === 'all' ? 'active' : ''}`} onClick={() => setFeedFilter('all')}>
+                      <Icon name="local_fire_department" filled={feedFilter === 'all'} /> Todos
+                    </button>
+                    <button type="button" className={`chip ${feedFilter === 'media' ? 'active' : ''}`} onClick={() => setFeedFilter('media')}>
+                      <Icon name="photo_camera" /> Com mídia
+                    </button>
+                    <button type="button" className={`chip ${feedFilter === 'mine' ? 'active' : ''}`} onClick={() => setFeedFilter('mine')}>
+                      <Icon name="person" /> Meus
+                    </button>
+                  </section>
 
-                 <div className="post-actions">
-                   <div className="upload-btn-wrapper">
-                     <button type="button" className="btn-secondary">Adicionar Foto/Vídeo</button>
-                     <input type="file" accept="image/*,video/*" onChange={handleMediaUpload} />
-                   </div>
-                   
-                   <div className="tag-users-dropdown">
-                     <span>Marcar amigos:</span>
-                     <div className="tagged-users-list">
-                       {users.filter(u => u.email !== currentUser.email).map(u => (
-                         <label key={u.email} className="tag-checkbox">
-                           <input 
-                             type="checkbox" 
-                             checked={taggedUsers.includes(u.email)}
-                             onChange={(e) => {
-                               if (e.target.checked) setTaggedUsers(prev => [...prev, u.email]);
-                               else setTaggedUsers(prev => prev.filter(email => email !== u.email));
-                             }}
-                           />
-                           {u.name}
-                         </label>
-                       ))}
-                       {users.filter(u => u.email !== currentUser.email).length === 0 && (
-                         <small className="no-users-hint">Nenhum outro usuário cadastrado.</small>
-                       )}
-                     </div>
-                   </div>
-                 </div>
+                  {visiblePosts.length === 0 ? (
+                    <div className="empty-timeline-card">
+                      <Icon name="swords" />
+                      <p className="empty-timeline">Nenhum desafio por aqui. Toque no raio para publicar o primeiro.</p>
+                    </div>
+                  ) : (
+                    visiblePosts.map(post => {
+                      const replies = posts.filter(p => String(p.parentId) === String(post.id))
+                      return (
+                        <article key={post.id} className={`post-card ${post.pendingSync ? 'post-pending' : ''}`}>
+                          <div className="post-header">
+                            <div className="author-info">
+                              <div className="avatar">{post.author?.name ? post.author.name.charAt(0).toUpperCase() : '?'}</div>
+                              <div className="author-details">
+                                <div className="author-name-row">
+                                  <strong>{post.author?.name || 'Anônimo'}</strong>
+                                  {post.pendingSync && <span className="badge-pending-sync">Pendente</span>}
+                                </div>
+                                <span className="timestamp">{new Date(post.timestamp).toLocaleString()}</span>
+                              </div>
+                            </div>
+                          </div>
 
-                 <button type="submit" className="btn-primary">
-                   {isOnline ? 'Publicar Desafio' : 'Salvar Desafio Offline'}
-                 </button>
-               </form>
-             </div>
+                          {post.taggedUsers && post.taggedUsers.length > 0 && (
+                            <div className="post-tags">
+                              <strong>Com:</strong> {post.taggedUsers.map(u => u.name).join(', ')}
+                            </div>
+                          )}
 
-             <div className="timeline">
-               <div className="timeline-header">
-                 <h3>Linha do Tempo</h3>
-                 {posts.length > 0 && (
-                   <span className="cached-counter">
-                     {posts.filter(p => !p.parentId).length} desafio(s)
-                   </span>
-                 )}
-               </div>
+                          {post.text && <p className="post-text">{post.text}</p>}
 
-               {posts.filter(p => !p.parentId).length === 0 ? (
-                 <div className="empty-timeline-card">
-                   <p className="empty-timeline">Nenhum desafio publicado ainda. Seja o primeiro!</p>
-                 </div>
-               ) : (
-                 posts.filter(p => !p.parentId).map(post => {
-                   const replies = posts.filter(p => String(p.parentId) === String(post.id));
-                   return (
-                     <div key={post.id} className={`post-card ${post.pendingSync ? 'post-pending' : ''}`}>
-                       <div className="post-header">
-                         <div className="author-info">
-                           <div className="avatar">{post.author?.name ? post.author.name.charAt(0).toUpperCase() : '?'}</div>
-                           <div className="author-details">
-                             <div className="author-name-row">
-                               <strong>{post.author?.name || 'Anônimo'}</strong>
-                               {post.pendingSync && (
-                                 <span className="badge-pending-sync" title="Este item está salvo no seu dispositivo e será sincronizado quando houver conexão">
-                                   ⏳ Pendente de envio
-                                 </span>
-                               )}
-                             </div>
-                             <span className="timestamp">{new Date(post.timestamp).toLocaleString()}</span>
-                           </div>
-                         </div>
-                       </div>
-                       
-                       {post.taggedUsers && post.taggedUsers.length > 0 && (
-                         <div className="post-tags">
-                           <strong>Com:</strong> {post.taggedUsers.map(u => u.name).join(', ')}
-                         </div>
-                       )}
-                       
-                       <p className="post-text">{post.text}</p>
-                       
-                       {post.media && (
-                         <div className="post-media">
-                           {post.mediaType === 'video' ? (
-                              <video src={post.media} controls />
-                           ) : (
-                              <img src={post.media} alt="Post media" />
-                           )}
-                         </div>
-                       )}
+                          {post.media && (
+                            <div className="post-media">
+                              {post.mediaType === 'video' ? (
+                                <video src={post.media} controls />
+                              ) : (
+                                <img src={post.media} alt="Mídia do desafio" />
+                              )}
+                            </div>
+                          )}
 
-                       {/* Replies Section */}
-                       <div className="replies-section">
-                         {replies.length > 0 && (
-                           <div className="replies-list">
-                             {replies.map(reply => (
-                               <div key={reply.id} className={`reply-card ${reply.pendingSync ? 'reply-pending' : ''}`}>
-                                 <div className="reply-author">
-                                   <div className="avatar avatar-sm">{reply.author?.name ? reply.author.name.charAt(0).toUpperCase() : '?'}</div>
-                                   <div className="author-details">
-                                     <div className="author-name-row">
-                                       <strong>{reply.author?.name || 'Anônimo'}</strong>
-                                       {reply.pendingSync && (
-                                         <span className="badge-pending-sync-sm">⏳ Pendente</span>
-                                       )}
-                                     </div>
-                                     <span className="timestamp">{new Date(reply.timestamp).toLocaleString()}</span>
-                                   </div>
-                                 </div>
-                                 {reply.text && <p className="post-text">{reply.text}</p>}
-                                 {reply.media && (
-                                   <div className="post-media">
-                                     {reply.mediaType === 'video' ? (
-                                       <video src={reply.media} controls />
-                                     ) : (
-                                       <img src={reply.media} alt="Resposta" />
-                                     )}
-                                   </div>
-                                 )}
-                               </div>
-                             ))}
-                           </div>
-                         )}
+                          <div className="replies-section">
+                            {replies.length > 0 && (
+                              <div className="replies-list">
+                                {replies.map(reply => (
+                                  <div key={reply.id} className={`reply-card ${reply.pendingSync ? 'reply-pending' : ''}`}>
+                                    <div className="reply-author">
+                                      <div className="avatar avatar-sm">{reply.author?.name ? reply.author.name.charAt(0).toUpperCase() : '?'}</div>
+                                      <div className="author-details">
+                                        <div className="author-name-row">
+                                          <strong>{reply.author?.name || 'Anônimo'}</strong>
+                                          {reply.pendingSync && <span className="badge-pending-sync-sm">Pendente</span>}
+                                        </div>
+                                        <span className="timestamp">{new Date(reply.timestamp).toLocaleString()}</span>
+                                      </div>
+                                    </div>
+                                    {reply.text && <p className="post-text">{reply.text}</p>}
+                                    {reply.media && (
+                                      <div className="post-media">
+                                        {reply.mediaType === 'video' ? (
+                                          <video src={reply.media} controls />
+                                        ) : (
+                                          <img src={reply.media} alt="Resposta" />
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
 
-                         <button
-                           type="button"
-                           className="reply-toggle-btn"
-                           onClick={() => {
-                             setActiveReplyId(activeReplyId === post.id ? null : post.id);
-                             setReplyText('');
-                             setReplyMedia(null);
-                             setReplyMediaType('');
-                           }}
-                         >
-                           {activeReplyId === post.id ? '✕ Cancelar' : `💬 Responder Desafio${replies.length > 0 ? ` (${replies.length})` : ''}`}
-                         </button>
+                            <button
+                              type="button"
+                              className="btn-primary reply-cta"
+                              onClick={() => {
+                                setActiveReplyId(activeReplyId === post.id ? null : post.id)
+                                setReplyText('')
+                                setReplyMedia(null)
+                                setReplyMediaType('')
+                              }}
+                            >
+                              <Icon name={activeReplyId === post.id ? 'close' : 'reply'} />
+                              {activeReplyId === post.id ? 'Cancelar' : `Responder${replies.length > 0 ? ` (${replies.length})` : ''}`}
+                            </button>
 
-                         {activeReplyId === post.id && (
-                           <form className="reply-form" onSubmit={(e) => handleCreateReply(e, post.id)}>
-                             <textarea
-                               className="post-input reply-input"
-                               placeholder={isOnline ? "Escreva sua resposta ao desafio..." : "Escreva sua resposta (será salva offline)..."}
-                               value={replyText}
-                               onChange={(e) => setReplyText(e.target.value)}
-                             />
-                             {replyMedia && (
-                               <div className="media-preview">
-                                 {replyMediaType === 'video' ? (
-                                   <video src={replyMedia} controls />
-                                 ) : (
-                                   <img src={replyMedia} alt="Preview" />
-                                 )}
-                                 <button type="button" onClick={() => { setReplyMedia(null); setReplyMediaType(''); }}>Remover</button>
-                               </div>
-                             )}
-                             <div className="reply-actions">
-                               <div className="upload-btn-wrapper">
-                                 <button type="button" className="btn-secondary">📷 Foto/Vídeo</button>
-                                 <input type="file" accept="image/*,video/*" onChange={handleReplyMediaUpload} />
-                               </div>
-                               <button type="submit" className="btn-primary reply-submit-btn">
-                                 {isOnline ? 'Enviar Resposta' : 'Salvar Resposta Offline'}
-                               </button>
-                             </div>
-                           </form>
-                         )}
-                       </div>
-                     </div>
-                   );
-                 })
-               )}
-             </div>
-          </div>
-        </div>
-      )}
+                            {activeReplyId === post.id && (
+                              <form className="reply-form" onSubmit={(e) => handleCreateReply(e, post.id)}>
+                                <textarea
+                                  className="post-input reply-input"
+                                  placeholder={isOnline ? 'Escreva sua resposta ao desafio...' : 'Escreva sua resposta (será salva offline)...'}
+                                  value={replyText}
+                                  onChange={(e) => setReplyText(e.target.value)}
+                                />
+                                {replyMedia && (
+                                  <div className="media-preview">
+                                    {replyMediaType === 'video' ? (
+                                      <video src={replyMedia} controls />
+                                    ) : (
+                                      <img src={replyMedia} alt="Preview" />
+                                    )}
+                                    <button type="button" onClick={() => { setReplyMedia(null); setReplyMediaType('') }}>Remover</button>
+                                  </div>
+                                )}
+                                <div className="reply-actions">
+                                  <div className="upload-btn-wrapper">
+                                    <button type="button" className="btn-secondary">Foto/Vídeo</button>
+                                    <input type="file" accept="image/*,video/*" onChange={handleReplyMediaUpload} />
+                                  </div>
+                                  <button type="submit" className="btn-primary reply-submit-btn">
+                                    {isOnline ? 'Enviar' : 'Salvar offline'}
+                                  </button>
+                                </div>
+                              </form>
+                            )}
+                          </div>
+                        </article>
+                      )
+                    })
+                  )}
+                </>
+              )}
 
-      {/* Toast Notifications */}
+              {currentView === 'create' && (
+                <form className="create-screen" onSubmit={handleCreatePost}>
+                  <div className="create-top">
+                    <button type="button" className="icon-round" onClick={() => openAppView('dashboard')} aria-label="Fechar">
+                      <Icon name="close" />
+                    </button>
+                    <h1>Novo desafio</h1>
+                  </div>
+
+                  <section className="create-block">
+                    <label className="block-label" htmlFor="challenge-title">Meta do desafio</label>
+                    <textarea
+                      id="challenge-title"
+                      className="post-input"
+                      placeholder={isOnline ? 'Qual o seu desafio de hoje?' : 'Qual o seu desafio de hoje? (será salvo offline)'}
+                      value={postText}
+                      onChange={(e) => setPostText(e.target.value)}
+                    />
+                  </section>
+
+                  <section className="create-block">
+                    <div className="block-label-row">
+                      <span className="block-label">Foto ou vídeo</span>
+                      <span className="hint">Até 5MB</span>
+                    </div>
+                    {postMedia && (
+                      <div className="media-preview">
+                        {postMediaType === 'video' ? (
+                          <video src={postMedia} controls />
+                        ) : (
+                          <img src={postMedia} alt="Preview" />
+                        )}
+                        <button type="button" onClick={() => { setPostMedia(null); setPostMediaType('') }}>Remover</button>
+                      </div>
+                    )}
+                    <div className="upload-drop">
+                      <Icon name="cloud_upload" />
+                      <p>Enviar foto ou vídeo</p>
+                      <div className="upload-btn-wrapper full">
+                        <button type="button" className="btn-secondary">Escolher arquivo</button>
+                        <input type="file" accept="image/*,video/*" onChange={handleMediaUpload} />
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="create-block">
+                    <span className="block-label">Marcar amigos</span>
+                    <div className="tagged-users-list">
+                      {users.filter(u => u.email !== currentUser.email).map(u => (
+                        <label key={u.email} className={`tag-chip ${taggedUsers.includes(u.email) ? 'selected' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={taggedUsers.includes(u.email)}
+                            onChange={(e) => {
+                              if (e.target.checked) setTaggedUsers(prev => [...prev, u.email])
+                              else setTaggedUsers(prev => prev.filter(email => email !== u.email))
+                            }}
+                          />
+                          <span className="avatar avatar-sm">{u.name.charAt(0).toUpperCase()}</span>
+                          {u.name}
+                        </label>
+                      ))}
+                      {users.filter(u => u.email !== currentUser.email).length === 0 && (
+                        <small className="no-users-hint">Nenhum outro usuário cadastrado.</small>
+                      )}
+                    </div>
+                  </section>
+
+                  <button type="submit" className="btn-primary sticky-cta">
+                    <Icon name="bolt" filled />
+                    {isOnline ? 'Publicar desafio' : 'Salvar desafio offline'}
+                  </button>
+                </form>
+              )}
+
+              {currentView === 'profile' && (
+                <section className="profile-screen">
+                  <div className="profile-hero">
+                    <div className="avatar xl">{currentUser.name.charAt(0).toUpperCase()}</div>
+                    <h1>{currentUser.name}</h1>
+                    <p>{currentUser.email}</p>
+                  </div>
+                  <button type="button" className="btn-secondary qr-trigger" onClick={() => setShowQR(!showQR)}>
+                    <Icon name="qr_code_2" />
+                    {showQR ? 'Ocultar QR Code' : 'QR Code do app'}
+                  </button>
+                  {showQR && (
+                    <div className="qr-panel">
+                      <QRCode value={window.location.origin + window.location.pathname} size={180} />
+                      <p>Aponte a câmera para<br />instalar o app</p>
+                    </div>
+                  )}
+                  <button type="button" className="btn-primary btn-danger" onClick={handleLogout}>Sair</button>
+                </section>
+              )}
+            </main>
+
+            <nav className="bottom-nav" aria-label="Navegação principal">
+              <div className="bottom-nav-inner">
+                <button
+                  type="button"
+                  className={`nav-item ${(currentView === 'dashboard' || currentView === 'login') ? 'active' : ''}`}
+                  onClick={() => openAppView('dashboard')}
+                >
+                  <Icon name="swords" filled={currentView === 'dashboard' || currentView === 'login'} />
+                  <span>Arena</span>
+                </button>
+                <button type="button" className="nav-item" onClick={() => comingSoon('Amigos')}>
+                  <Icon name="group" />
+                  <span>Amigos</span>
+                </button>
+                <button type="button" className="nav-item nav-fab-wrap" onClick={() => openAppView('create')} aria-label="Criar desafio">
+                  <span className="nav-fab"><Icon name="bolt" filled /></span>
+                  <span>Desafiar</span>
+                </button>
+                <button type="button" className="nav-item" onClick={() => comingSoon('Parties')}>
+                  <Icon name="groups" />
+                  <span>Parties</span>
+                </button>
+                <button
+                  type="button"
+                  className={`nav-item ${currentView === 'profile' ? 'active' : ''}`}
+                  onClick={() => openAppView('profile')}
+                >
+                  <Icon name="person" filled={currentView === 'profile'} />
+                  <span>Perfil</span>
+                </button>
+              </div>
+            </nav>
+          </>
+        )}
+      </div>
+
       <div className="toast-container">
         {toasts.map(toast => (
           <div key={toast.id} className={`toast ${toast.type}`}>
             <span>{toast.message}</span>
-            <button onClick={() => removeToast(toast.id)} className="toast-close">
-              &times;
-            </button>
+            <button onClick={() => removeToast(toast.id)} className="toast-close">&times;</button>
           </div>
         ))}
       </div>
-    </>
+    </div>
   )
 }
 
 export default App
-
-

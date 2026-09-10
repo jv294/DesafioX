@@ -2,7 +2,9 @@
 
 ## Descrição
 
-O Desafio X é uma rede social que permite aos usuários compartilhar fotos, vídeos e mensagens uns com os outros.
+O Desafio X é uma rede social de desafios. O usuário cria uma conta, publica desafios com texto e mídia, responde no feed e marca outras pessoas.
+
+O app funciona como PWA (híbrido). Dá para usar no navegador e também instalar pelo Chrome. Sem internet, os desafios ficam salvos no aparelho e são enviados quando a conexão volta.
 
 ### [Repositorio do GitHub](https://github.com/jv294/DesafioX)
 
@@ -13,6 +15,26 @@ O Desafio X é uma rede social que permite aos usuários compartilhar fotos, ví
 - José Carlos Lago Carvalho Neto (202312488)
 - Almir Coelho Rubim Junior (202312480)
 - Laura Gomes da Fonseca (202312824)
+
+## Como rodar
+
+```
+npm install
+npm run dev
+```
+
+O front abre em `http://localhost:5173` e a API em `http://localhost:3001`.
+
+## O que já funciona
+
+- Login e cadastro (somente maiores de 18 anos)
+- Feed de desafios, respostas e upload de foto/vídeo (até 5 MB)
+- Indicador visual de Online / Offline
+- Persistência no aparelho (`localStorage`): sessão, posts e fila
+- Fila de sincronização: se estiver offline, o desafio é guardado e enviado ao reconectar
+- Toasts avisando conexão, salvamento offline e sync
+- QR Code para abrir/instalar o app
+- PWA com cache para uso offline
 
 ## Matriz de Funcionalidades:
 
@@ -33,7 +55,7 @@ O Desafio X é uma rede social que permite aos usuários compartilhar fotos, ví
       <td>React + Vite</td>
     </tr>
     <tr>
-      <td>cadastro</td>
+      <td>cadastro (18+)</td>
       <td>✔</td>
       <td>✔</td>
       <td>React + Vite</td>
@@ -45,10 +67,16 @@ O Desafio X é uma rede social que permite aos usuários compartilhar fotos, ví
       <td>React + Vite</td>
     </tr>
     <tr>
-      <td>caixa de mensagens</td>
+      <td>feed de desafios</td>
       <td>✔</td>
       <td>✔</td>
       <td>React + Vite</td>
+    </tr>
+    <tr>
+      <td>offline / fila / sync</td>
+      <td>✔</td>
+      <td>✔</td>
+      <td>localStorage + PWA</td>
     </tr>
   </tbody>
 </table>
@@ -71,65 +99,47 @@ O Desafio X é uma rede social que permite aos usuários compartilhar fotos, ví
       <td>Sim</td>
       <td>Sim</td>
       <td>Sim</td>
-      <td>Sim</td>
+      <td>Não</td>
     </tr>
     <tr>
       <td>cadastro</td>
       <td>Sim</td>
       <td>Sim</td>
       <td>Sim</td>
-      <td>Sim</td>
+      <td>Não</td>
     </tr>
     <tr>
       <td>upload de midia</td>
       <td>Sim</td>
       <td>Sim</td>
       <td>Sim</td>
-      <td>Sim</td>
+      <td>Não</td>
     </tr>
     <tr>
-      <td>caixa de mensagens</td>
+      <td>feed de desafios</td>
       <td>Sim</td>
       <td>Sim</td>
       <td>Sim</td>
+      <td>Não</td>
+    </tr>
+    <tr>
+      <td>modo offline e sincronização</td>
       <td>Sim</td>
+      <td>Sim</td>
+      <td>Sim</td>
+      <td>Não</td>
     </tr>
   </tbody>
 </table>
 
 ## Proposta de evolução
 
-1. Adaptação para o usuário.
-2. Proibição de postagem ofensiva, nociva e toxica.
+1. Empacotar o PWA em APK para instalar direto no Android.
+2. Melhorar o perfil do usuário.
+3. Sistema de progresso e XP.
 
 ## Funcionalidades a serem desenvolvidas
 
-* Melhorar perfil do usuário.
-* Sistema de Progresso e XP.
-* Centralizar as configurações de estilo.
-* Personaliza o perfil do usuário.
-
-<br>
-
----
----
----
-
-<br>
-
-# React + Vite
-
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+* Gerar APK instalável
+* Personalizar o perfil do usuário
+* Sistema de Progresso e XP

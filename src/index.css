@@ -1,39 +1,106 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+:root {
+  --canvas: #0a0a0c;
+  --surface: #131318;
+  --surface-low: #1b1b20;
+  --surface-container: #1f1f24;
+  --surface-high: #2a292f;
+  --surface-elevated: #1c1c24;
+  --on-surface: #e4e1e8;
+  --on-surface-variant: #e5beb2;
+  --muted: #8e8e9f;
+  --outline: #ac897e;
+  --outline-soft: rgba(255, 255, 255, 0.08);
+  --primary: #ff5708;
+  --primary-hover: #ff6b00;
+  --primary-soft: #ffb59c;
+  --primary-ink: #511500;
+  --gold: #feb700;
+  --mint: #00e297;
+  --error: #ffb4ab;
+  --error-strong: #93000a;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --font-display: 'Outfit', sans-serif;
+  --font-body: 'Plus Jakarta Sans', sans-serif;
+  --font-label: 'Space Grotesk', sans-serif;
+  --glow-primary: 0 0 20px rgba(255, 87, 8, 0.4);
+}
 
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 87, 8, 0.5);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
 }
 
 body {
-  font-family: 'Inter', sans-serif;
-  background: linear-gradient(135deg, #0f172a, #1e293b, #334155);
-  background-size: 400% 400%;
-  animation: gradientBG 15s ease infinite;
-  color: #f8fafc;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  font-family: var(--font-body);
+  background: #050507;
+  color: var(--on-surface);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-@keyframes gradientBG {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-size: 22px;
+  line-height: 1;
+  display: inline-flex;
+  user-select: none;
 }
 
 button {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-label);
   cursor: pointer;
   border: none;
   outline: none;
 }
 
-input {
-  font-family: 'Inter', sans-serif;
+input,
+textarea {
+  font-family: var(--font-body);
   outline: none;
+}
+
+::selection {
+  background: var(--primary);
+  color: var(--canvas);
 }

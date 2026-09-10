@@ -12,11 +12,11 @@ export default defineConfig({
         name: 'Desafio X',
         short_name: 'DesafioX',
         description: 'Aplicativo de Desafios com suporte Offline',
-        theme_color: '#0f172a',
+        theme_color: '#0a0a0c',
         start_url: '/',
         scope: '/',
         display: 'standalone',
-        background_color: '#0f172a',
+        background_color: '#0a0a0c',
         icons: [
           {
             src: 'icon.svg',
