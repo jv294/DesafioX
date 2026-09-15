@@ -6,6 +6,8 @@ O Desafio X é uma rede social de desafios. O usuário cria uma conta, publica d
 
 O app funciona como PWA (híbrido). Dá para usar no navegador e também instalar pelo Chrome. Sem internet, os desafios ficam salvos no aparelho e são enviados quando a conexão volta.
 
+### [Link funcional do app](https://desafio-x-jfqd.vercel.app/)
+
 ### [Repositorio do GitHub](https://github.com/jv294/DesafioX)
 
 ## Integrantes
@@ -137,6 +139,8 @@ O front abre em `http://localhost:5173` e a API em `http://localhost:3001`.
 1. Empacotar o PWA em APK para instalar direto no Android.
 2. Melhorar o perfil do usuário.
 3. Sistema de progresso e XP.
+4. Dividir codigo da aplicação em modulos.
+5. Unificar a configuração dos estilos e temas aplicados.
 
 ## Funcionalidades a serem desenvolvidas
 
