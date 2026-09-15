@@ -8,6 +8,8 @@ O app funciona como PWA (híbrido). Dá para usar no navegador e também instala
 
 ### [Link funcional do app](https://desafio-x-jfqd.vercel.app/)
 
+### [Baixar APK do app](https://github.com/jv294/DesafioX/tree/main/build/app-debug.apk)
+
 ### [Repositorio do GitHub](https://github.com/jv294/DesafioX)
 
 ## Integrantes
