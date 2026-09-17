@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">desafio x</string>
+    <string name="title_activity_main">desafio x</string>
+    <string name="package_name">com.thorapps.desafiox</string>
+    <string name="custom_url_scheme">com.thorapps.desafiox</string>
+</resources>
