@@ -62,21 +62,20 @@
 html,
 body,
 #root {
+  width: 100%;
   min-height: 100%;
+  min-height: 100dvh;
 }
 
 body {
   font-family: var(--font-body);
-  background: #050507;
+  background: var(--canvas);
   color: var(--on-surface);
   min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-#root {
-  width: 100%;
-  min-height: 100vh;
 }
 
 .material-symbols-outlined {

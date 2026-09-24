@@ -21,6 +21,65 @@ function Icon({ name, filled = false, className = '' }) {
   )
 }
 
+function MediaPickers({ onChange, mode = 'media' }) {
+  const photoOnly = mode === 'photo'
+  return (
+    <div className="media-actions">
+      <div className="upload-btn-wrapper">
+        <button type="button" className="btn-secondary">
+          <Icon name="photo_library" /> Galeria
+        </button>
+        <input type="file" accept={photoOnly ? 'image/*' : 'image/*,video/*'} onChange={onChange} />
+      </div>
+      <div className="upload-btn-wrapper">
+        <button type="button" className="btn-secondary">
+          <Icon name="photo_camera" /> Tirar foto
+        </button>
+        <input type="file" accept="image/*" capture="environment" onChange={onChange} />
+      </div>
+      {!photoOnly && (
+        <div className="upload-btn-wrapper">
+          <button type="button" className="btn-secondary">
+            <Icon name="videocam" /> Gravar
+          </button>
+          <input type="file" accept="video/*" capture="environment" onChange={onChange} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function UserAvatar({ user, size = '' }) {
+  const letter = user?.name?.charAt(0)?.toUpperCase() || '?'
+  return (
+    <div className={`avatar ${size}`.trim()}>
+      {user?.avatar ? <img src={user.avatar} alt={user.name || 'Foto de perfil'} /> : letter}
+    </div>
+  )
+}
+
+function resizeImageToDataUrl(file, maxSize = 400) {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    const url = URL.createObjectURL(file)
+    image.onload = () => {
+      const canvas = document.createElement('canvas')
+      const scale = Math.min(maxSize / image.width, maxSize / image.height, 1)
+      canvas.width = Math.max(1, Math.round(image.width * scale))
+      canvas.height = Math.max(1, Math.round(image.height * scale))
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
+      URL.revokeObjectURL(url)
+      resolve(canvas.toDataURL('image/jpeg', 0.82))
+    }
+    image.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('Não foi possível ler a imagem.'))
+    }
+    image.src = url
+  })
+}
+
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -95,6 +154,9 @@ function App() {
   const [showPassword, setShowPassword] = useState(false)
   const [showQR, setShowQR] = useState(false)
   const [feedFilter, setFeedFilter] = useState('all')
+  const [editingProfile, setEditingProfile] = useState(false)
+  const [profileName, setProfileName] = useState('')
+  const [profileAvatar, setProfileAvatar] = useState(null)
 
   const removeToast = useCallback((id) => {
     setToasts(prev => prev.filter(toast => toast.id !== id))
@@ -359,7 +421,8 @@ const handleRegister = async (e) => {
     const newUser = {
       id: data.id,
       name: data.name,
-      email: data.email
+      email: data.email,
+      avatar: data.avatar || null
     }
 
     setUsers(prev => [...prev, newUser])
@@ -418,7 +481,7 @@ const handleRegister = async (e) => {
         return
       }
 
-      const loggedUser = { id: data.id, name: data.name, email: data.email }
+      const loggedUser = { id: data.id, name: data.name, email: data.email, avatar: data.avatar || null }
       setCurrentUser(loggedUser)
       localStorage.setItem('currentUser', JSON.stringify(loggedUser))
       clearForm()
@@ -432,12 +495,94 @@ const handleRegister = async (e) => {
   const handleLogout = () => {
     setCurrentUser(null)
     localStorage.removeItem('currentUser')
+    setEditingProfile(false)
     setCurrentView('login')
     addToast('Você saiu do sistema.', 'info')
   }
 
-  const handleMediaUpload = (e) => {
+  const applyUserUpdate = (updated) => {
+    setCurrentUser(updated)
+    localStorage.setItem('currentUser', JSON.stringify(updated))
+    setUsers(prev => prev.map(u => (u.email === updated.email ? { ...u, ...updated } : u)))
+    setPosts(prev => prev.map(p => {
+      if (p.author?.email !== updated.email) return p
+      return { ...p, author: { ...p.author, name: updated.name, avatar: updated.avatar } }
+    }))
+  }
+
+  const startEditProfile = () => {
+    setProfileName(currentUser.name || '')
+    setProfileAvatar(currentUser.avatar || null)
+    setEditingProfile(true)
+  }
+
+  const handleProfilePhoto = async (e) => {
     const file = e.target.files[0]
+    e.target.value = ''
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      addToast('Escolha uma imagem para o perfil.', 'error')
+      return
+    }
+    if (file.size > 8000000) {
+      addToast('Imagem muito grande! Máximo 8MB.', 'error')
+      return
+    }
+    try {
+      const data = await resizeImageToDataUrl(file)
+      setProfileAvatar(data)
+    } catch {
+      addToast('Não foi possível usar essa imagem.', 'error')
+    }
+  }
+
+  const handleSaveProfile = async (e) => {
+    e.preventDefault()
+    const trimmedName = profileName.trim()
+    if (!trimmedName) {
+      addToast('Informe um nome válido.', 'error')
+      return
+    }
+
+    const updated = {
+      ...currentUser,
+      name: trimmedName,
+      avatar: profileAvatar || null
+    }
+
+    if (!navigator.onLine) {
+      applyUserUpdate(updated)
+      setEditingProfile(false)
+      addToast('Perfil atualizado neste aparelho. Será sincronizado quando você estiver online.', 'warning')
+      return
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: currentUser.email,
+          name: trimmedName,
+          avatar: profileAvatar || null
+        })
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        addToast(data.error || 'Erro ao salvar o perfil.', 'error')
+        return
+      }
+      applyUserUpdate({ ...updated, ...data })
+      setEditingProfile(false)
+      addToast('Perfil atualizado.', 'success')
+    } catch {
+      applyUserUpdate(updated)
+      setEditingProfile(false)
+      addToast('Sem conexão. O perfil ficou salvo neste aparelho.', 'warning')
+    }
+  }
+
+  const readMediaFile = (file, onReady) => {
     if (!file) return
 
     if (file.size > 5000000) {
@@ -447,27 +592,27 @@ const handleRegister = async (e) => {
 
     const reader = new FileReader()
     reader.onloadend = () => {
-      setPostMedia(reader.result)
-      setPostMediaType(file.type.startsWith('video/') ? 'video' : 'image')
+      onReady(reader.result, file.type.startsWith('video/') ? 'video' : 'image')
     }
     reader.readAsDataURL(file)
   }
 
+  const handleMediaUpload = (e) => {
+    const file = e.target.files[0]
+    e.target.value = ''
+    readMediaFile(file, (data, type) => {
+      setPostMedia(data)
+      setPostMediaType(type)
+    })
+  }
+
   const handleReplyMediaUpload = (e) => {
     const file = e.target.files[0]
-    if (!file) return
-
-    if (file.size > 5000000) {
-      addToast('Arquivo muito grande! Máximo 5MB.', 'error')
-      return
-    }
-
-    const reader = new FileReader()
-    reader.onloadend = () => {
-      setReplyMedia(reader.result)
-      setReplyMediaType(file.type.startsWith('video/') ? 'video' : 'image')
-    }
-    reader.readAsDataURL(file)
+    e.target.value = ''
+    readMediaFile(file, (data, type) => {
+      setReplyMedia(data)
+      setReplyMediaType(type)
+    })
   }
 
   const handleCreatePost = async (e) => {
@@ -839,7 +984,7 @@ const handleRegister = async (e) => {
                         <article key={post.id} className={`post-card ${post.pendingSync ? 'post-pending' : ''}`}>
                           <div className="post-header">
                             <div className="author-info">
-                              <div className="avatar">{post.author?.name ? post.author.name.charAt(0).toUpperCase() : '?'}</div>
+                              <UserAvatar user={users.find(u => u.email === post.author?.email) || post.author} />
                               <div className="author-details">
                                 <div className="author-name-row">
                                   <strong>{post.author?.name || 'Anônimo'}</strong>
@@ -874,7 +1019,7 @@ const handleRegister = async (e) => {
                                 {replies.map(reply => (
                                   <div key={reply.id} className={`reply-card ${reply.pendingSync ? 'reply-pending' : ''}`}>
                                     <div className="reply-author">
-                                      <div className="avatar avatar-sm">{reply.author?.name ? reply.author.name.charAt(0).toUpperCase() : '?'}</div>
+                                      <UserAvatar user={users.find(u => u.email === reply.author?.email) || reply.author} size="avatar-sm" />
                                       <div className="author-details">
                                         <div className="author-name-row">
                                           <strong>{reply.author?.name || 'Anônimo'}</strong>
@@ -931,10 +1076,7 @@ const handleRegister = async (e) => {
                                   </div>
                                 )}
                                 <div className="reply-actions">
-                                  <div className="upload-btn-wrapper">
-                                    <button type="button" className="btn-secondary">Foto/Vídeo</button>
-                                    <input type="file" accept="image/*,video/*" onChange={handleReplyMediaUpload} />
-                                  </div>
+                                  <MediaPickers onChange={handleReplyMediaUpload} />
                                   <button type="submit" className="btn-primary reply-submit-btn">
                                     {isOnline ? 'Enviar' : 'Salvar offline'}
                                   </button>
@@ -985,12 +1127,9 @@ const handleRegister = async (e) => {
                       </div>
                     )}
                     <div className="upload-drop">
-                      <Icon name="cloud_upload" />
-                      <p>Enviar foto ou vídeo</p>
-                      <div className="upload-btn-wrapper full">
-                        <button type="button" className="btn-secondary">Escolher arquivo</button>
-                        <input type="file" accept="image/*,video/*" onChange={handleMediaUpload} />
-                      </div>
+                      <Icon name="photo_camera" />
+                      <p>Galeria, câmera ou gravação</p>
+                      <MediaPickers onChange={handleMediaUpload} />
                     </div>
                   </section>
 
@@ -1007,7 +1146,7 @@ const handleRegister = async (e) => {
                               else setTaggedUsers(prev => prev.filter(email => email !== u.email))
                             }}
                           />
-                          <span className="avatar avatar-sm">{u.name.charAt(0).toUpperCase()}</span>
+                          <UserAvatar user={u} size="avatar-sm" />
                           {u.name}
                         </label>
                       ))}
@@ -1027,20 +1166,40 @@ const handleRegister = async (e) => {
               {currentView === 'profile' && (
                 <section className="profile-screen">
                   <div className="profile-hero">
-                    <div className="avatar xl">{currentUser.name.charAt(0).toUpperCase()}</div>
-                    <h1>{currentUser.name}</h1>
-                    <p>{currentUser.email}</p>
-                  </div>
-                  <button type="button" className="btn-secondary qr-trigger" onClick={() => setShowQR(!showQR)}>
-                    <Icon name="qr_code_2" />
-                    {showQR ? 'Ocultar QR Code' : 'QR Code do app'}
-                  </button>
-                  {showQR && (
-                    <div className="qr-panel">
-                      <QRCode value={window.location.origin + window.location.pathname} size={180} />
-                      <p>Aponte a câmera para<br />instalar o app</p>
+                    <div className="avatar-edit">
+                      <UserAvatar user={editingProfile ? { ...currentUser, avatar: profileAvatar, name: profileName } : currentUser} size="xl" />
                     </div>
-                  )}
+                    {editingProfile ? (
+                      <form className="profile-edit-form" onSubmit={handleSaveProfile}>
+                        <MediaPickers mode="photo" onChange={handleProfilePhoto} />
+                        <label className="field">
+                          <span>Nome</span>
+                          <div className="arena-input">
+                            <Icon name="person" />
+                            <input
+                              type="text"
+                              value={profileName}
+                              onChange={(e) => setProfileName(e.target.value)}
+                              placeholder="Seu nome"
+                            />
+                          </div>
+                        </label>
+                        <p className="profile-email">{currentUser.email}</p>
+                        <button type="submit" className="btn-primary">Salvar perfil</button>
+                        <button type="button" className="btn-secondary" onClick={() => setEditingProfile(false)}>
+                          Cancelar
+                        </button>
+                      </form>
+                    ) : (
+                      <>
+                        <h1>{currentUser.name}</h1>
+                        <p>{currentUser.email}</p>
+                        <button type="button" className="btn-secondary" onClick={startEditProfile}>
+                          <Icon name="edit" /> Editar perfil
+                        </button>
+                      </>
+                    )}
+                  </div>
                   <button type="button" className="btn-primary btn-danger" onClick={handleLogout}>Sair</button>
                 </section>
               )}

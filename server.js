@@ -92,7 +92,7 @@ app.post('/api/register', async (req, res) => {
     // Gerar hash seguro da senha antes de persistir
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await usersCollection.insertOne({ name, email, password: hashedPassword, birthDate });
-    res.status(201).json({ id: result.insertedId, name, email });
+    res.status(201).json({ id: result.insertedId, name, email, avatar: null });
   } catch (err) {
     if (err.code === 11000) {
       return res.status(400).json({ error: 'Este e-mail já está cadastrado.' });
@@ -100,6 +100,15 @@ app.post('/api/register', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+function toPublicUser(user) {
+  return {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    avatar: user.avatar || null
+  };
+}
 
 // Login User
 app.post('/api/login', async (req, res) => {
@@ -120,7 +129,7 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
     }
 
-    res.json({ id: user._id, name: user.name, email: user.email });
+    res.json(toPublicUser(user));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -129,8 +138,42 @@ app.post('/api/login', async (req, res) => {
 // Get all users (for tagging and displaying in frontend)
 app.get('/api/users', async (req, res) => {
   try {
-    const users = await usersCollection.find({}, { projection: { _id: 1, name: 1, email: 1 } }).toArray();
-    res.json(users.map(user => ({ id: user._id, name: user.name, email: user.email })));
+    const users = await usersCollection.find({}, { projection: { _id: 1, name: 1, email: 1, avatar: 1 } }).toArray();
+    res.json(users.map(toPublicUser));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update profile (name and avatar)
+app.put('/api/profile', async (req, res) => {
+  const { email, name, avatar } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: 'E-mail do usuário não informado.' });
+  }
+
+  const trimmedName = typeof name === 'string' ? name.trim() : '';
+  if (!trimmedName) {
+    return res.status(400).json({ error: 'Informe um nome válido.' });
+  }
+
+  if (avatar && typeof avatar === 'string' && avatar.length > 2_500_000) {
+    return res.status(400).json({ error: 'Imagem de perfil muito grande. Tente outra foto.' });
+  }
+
+  try {
+    const result = await usersCollection.findOneAndUpdate(
+      { email },
+      { $set: { name: trimmedName, avatar: avatar || null } },
+      { returnDocument: 'after' }
+    );
+
+    const updated = result?.value || result;
+    if (!updated) {
+      return res.status(404).json({ error: 'Usuário não encontrado.' });
+    }
+
+    res.json(toPublicUser(updated));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
