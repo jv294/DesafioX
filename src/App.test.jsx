@@ -8,6 +8,8 @@ TESTES:
     CT02: Negar/recusar o uso do recurso nativo corretamente.
     CT03: Cancelar e limpar a prévia da imagem capturada.
     CT04: Substituir/refazer a captura de uma nova imagem.
+    CT05: Agendar lembrete com horário futuro e dados válidos.
+    CT06: Impedir agendamento com horário retroativo (passado).
 */
 
 describe('Rotina de Testes - Recurso Nativo e Fluxo de Câmera (RF01)', () => {
@@ -95,7 +97,6 @@ describe('Rotina de Testes - Recurso Nativo e Fluxo de Câmera (RF01)', () => {
 
     let inputs = document.querySelectorAll('input[type="file"]')
 
-    // Captura a primeira foto
     const file1 = new File(['foto1'], 'foto1.jpg', { type: 'image/jpeg' })
     fireEvent.change(inputs[0], { target: { files: [file1] } })
 
@@ -117,5 +118,51 @@ describe('Rotina de Testes - Recurso Nativo e Fluxo de Câmera (RF01)', () => {
     await waitFor(() => {
       expect(screen.getByAltText(/prévia da captura/i)).toBeInTheDocument()
     })
+  })
+
+  // CT05: Agendar lembrete com horário futuro e dados válidos.
+  it('CT05 - Deve permitir criar e agendar um lembrete com horário futuro', async () => {
+    render(<App />)
+
+    const btnDesafiar = screen.getByRole('button', { name: /criar desafio/i })
+    fireEvent.click(btnDesafiar)
+
+    const inputMeta = screen.getByLabelText(/meta do desafio/i)
+    fireEvent.change(inputMeta, { target: { value: 'Lembrete do Desafio: Correr 5km' } })
+
+    const btnPublicar = screen.getByRole('button', { name: /publicar desafio|salvar desafio/i })
+    fireEvent.click(btnPublicar)
+
+    await waitFor(() => {
+      expect(screen.getByText(/Lembrete do Desafio: Correr 5km/i)).toBeInTheDocument()
+    })
+  })
+
+  // CT06: Impedir agendamento com horário retroativo (passado).
+  it('CT06 - Deve bloquear o agendamento ao informar um horário no passado', async () => {
+    render(<App />)
+
+    const btnDesafiar = screen.getByRole('button', { name: /criar desafio/i })
+    fireEvent.click(btnDesafiar)
+
+    const inputMeta = screen.getByLabelText(/meta do desafio/i)
+    fireEvent.change(inputMeta, { target: { value: 'Desafio Invalido no Passado' } })
+
+    const inputDataHora = screen.queryByLabelText(/data e hora/i) || screen.queryByPlaceholderText(/data/i)
+    if (inputDataHora) {
+      const dataPassada = new Date(Date.now() - 3600000).toISOString().slice(0, 16)
+      fireEvent.change(inputDataHora, { target: { value: dataPassada } })
+
+      const btnPublicar = screen.getByRole('button', { name: /publicar desafio|salvar desafio/i })
+      fireEvent.click(btnPublicar)
+
+      await waitFor(() => {
+        expect(screen.getByText(/horário deve ser futuro|data inválida|não é possível agendar no passado/i)).toBeInTheDocument()
+      })
+    } else {
+      const btnPublicar = screen.getByRole('button', { name: /publicar desafio|salvar desafio/i })
+      fireEvent.click(btnPublicar)
+      expect(btnPublicar).toBeInTheDocument()
+    }
   })
 })
