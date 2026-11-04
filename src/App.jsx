@@ -262,11 +262,11 @@ function App() {
 
     const successCount = queueCopy.length - remaining.length - failed.length;
     if (successCount > 0) {
-      addToast(`âœ… ${successCount} item(ns) sincronizados.`, 'success');
+      addToast(`${successCount} item(ns) sincronizados.`, 'success');
     }
     if (failed.length > 0) {
       localStorage.setItem('desafiox_failed_queue', JSON.stringify(failed));
-      addToast(`âš ï¸ ${failed.length} item(ns) falharam permanentemente. Verifique e tente novamente.`, 'error');
+      addToast(`${failed.length} item(ns) falharam permanentemente. Verifique e tente novamente.`, 'error');
     }
   }, [addToast]);
 
@@ -715,6 +715,81 @@ const handleRegister = async (e) => {
     }
   }
 
+  const handleDeletePost = async (postToDelete) => {
+    if (!currentUser || !postToDelete) return
+
+    const isAuthor =
+      (postToDelete.author?.email && currentUser.email && postToDelete.author.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+      (postToDelete.author?.id && currentUser.id && String(postToDelete.author.id) === String(currentUser.id))
+
+    if (!isAuthor) {
+      addToast('Você só pode excluir suas próprias postagens.', 'error')
+      return
+    }
+
+    const isReply = Boolean(postToDelete.parentId)
+    const confirmMessage = isReply
+      ? 'Tem certeza que deseja excluir esta resposta?'
+      : 'Tem certeza que deseja excluir este desafio? As respostas vinculadas também serão removidas.'
+
+    if (!window.confirm(confirmMessage)) {
+      return
+    }
+
+    // Se a postagem for pendente (offline e ainda não sincronizada com o backend)
+    if (postToDelete.pendingSync) {
+      setPosts(prev => prev.filter(p => p.id !== postToDelete.id && p.parentId !== postToDelete.id))
+      setOfflineQueue(prev => prev.filter(item => item.tempId !== postToDelete.id))
+      if (activeReplyId === postToDelete.id) {
+        setActiveReplyId(null)
+      }
+      addToast(isReply ? 'Resposta pendente removida.' : 'Desafio pendente removido.', 'success')
+      return
+    }
+
+    if (!navigator.onLine) {
+      addToast('Você precisa estar online para excluir uma postagem já publicada.', 'warning')
+      return
+    }
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/posts/${postToDelete.id}?userEmail=${encodeURIComponent(currentUser.email)}&userId=${encodeURIComponent(currentUser.id || '')}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-email': currentUser.email,
+            'x-user-id': currentUser.id || ''
+          },
+          body: JSON.stringify({
+            userEmail: currentUser.email,
+            userId: currentUser.id
+          })
+        }
+      )
+
+      const contentType = response.headers.get('content-type')
+      const data = contentType && contentType.includes('application/json')
+        ? await response.json()
+        : { error: `Erro ${response.status}: Falha ao excluir postagem.` }
+
+      if (!response.ok) {
+        addToast(data.error || 'Erro ao excluir a postagem.', 'error')
+        return
+      }
+
+      setPosts(prev => prev.filter(p => String(p.id) !== String(postToDelete.id) && String(p.parentId) !== String(postToDelete.id)))
+      if (activeReplyId === postToDelete.id) {
+        setActiveReplyId(null)
+      }
+      addToast(isReply ? 'Resposta excluída com sucesso!' : 'Desafio excluído com sucesso!', 'success')
+    } catch {
+      addToast('Falha ao conectar com o servidor para excluir a postagem.', 'error')
+    }
+  }
+
+
   const switchView = (view) => {
     clearForm()
     setShowQR(false)
@@ -980,6 +1055,10 @@ const handleRegister = async (e) => {
                   ) : (
                     visiblePosts.map(post => {
                       const replies = posts.filter(p => String(p.parentId) === String(post.id))
+                      const isPostAuthor = currentUser && (
+                        (post.author?.email && currentUser.email && post.author.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+                        (post.author?.id && currentUser.id && String(post.author.id) === String(currentUser.id))
+                      )
                       return (
                         <article key={post.id} className={`post-card ${post.pendingSync ? 'post-pending' : ''}`}>
                           <div className="post-header">
@@ -993,6 +1072,17 @@ const handleRegister = async (e) => {
                                 <span className="timestamp">{new Date(post.timestamp).toLocaleString()}</span>
                               </div>
                             </div>
+                            {isPostAuthor && (
+                              <button
+                                type="button"
+                                className="btn-delete-post"
+                                onClick={() => handleDeletePost(post)}
+                                title="Excluir desafio"
+                                aria-label="Excluir desafio"
+                              >
+                                <Icon name="delete" />
+                              </button>
+                            )}
                           </div>
 
                           {post.taggedUsers && post.taggedUsers.length > 0 && (
@@ -1016,18 +1106,36 @@ const handleRegister = async (e) => {
                           <div className="replies-section">
                             {replies.length > 0 && (
                               <div className="replies-list">
-                                {replies.map(reply => (
-                                  <div key={reply.id} className={`reply-card ${reply.pendingSync ? 'reply-pending' : ''}`}>
-                                    <div className="reply-author">
-                                      <UserAvatar user={users.find(u => u.email === reply.author?.email) || reply.author} size="avatar-sm" />
-                                      <div className="author-details">
-                                        <div className="author-name-row">
-                                          <strong>{reply.author?.name || 'Anônimo'}</strong>
-                                          {reply.pendingSync && <span className="badge-pending-sync-sm">Pendente</span>}
+                                {replies.map(reply => {
+                                  const isReplyAuthor = currentUser && (
+                                    (reply.author?.email && currentUser.email && reply.author.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+                                    (reply.author?.id && currentUser.id && String(reply.author.id) === String(currentUser.id))
+                                  )
+                                  return (
+                                    <div key={reply.id} className={`reply-card ${reply.pendingSync ? 'reply-pending' : ''}`}>
+                                      <div className="reply-header">
+                                        <div className="reply-author">
+                                          <UserAvatar user={users.find(u => u.email === reply.author?.email) || reply.author} size="avatar-sm" />
+                                          <div className="author-details">
+                                            <div className="author-name-row">
+                                              <strong>{reply.author?.name || 'Anônimo'}</strong>
+                                              {reply.pendingSync && <span className="badge-pending-sync-sm">Pendente</span>}
+                                            </div>
+                                            <span className="timestamp">{new Date(reply.timestamp).toLocaleString()}</span>
+                                          </div>
                                         </div>
-                                        <span className="timestamp">{new Date(reply.timestamp).toLocaleString()}</span>
+                                        {isReplyAuthor && (
+                                          <button
+                                            type="button"
+                                            className="btn-delete-post btn-delete-reply"
+                                            onClick={() => handleDeletePost(reply)}
+                                            title="Excluir resposta"
+                                            aria-label="Excluir resposta"
+                                          >
+                                            <Icon name="delete" />
+                                          </button>
+                                        )}
                                       </div>
-                                    </div>
                                     {reply.text && <p className="post-text">{reply.text}</p>}
                                     {reply.media && (
                                       <div className="post-media">
@@ -1038,8 +1146,9 @@ const handleRegister = async (e) => {
                                         )}
                                       </div>
                                     )}
-                                  </div>
-                                ))}
+                                      </div>
+                                    )
+                                  })}
                               </div>
                             )}
 

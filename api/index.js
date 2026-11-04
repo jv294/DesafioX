@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { MongoClient } from 'mongodb';
+import { MongoClient, ObjectId } from 'mongodb';
 import bcrypt from 'bcryptjs';
 
 dotenv.config();
@@ -204,6 +204,84 @@ app.post('/api/posts', async (req, res) => {
     };
     const result = await postsCollection.insertOne(newPost);
     res.status(201).json({ id: result.insertedId, ...newPost });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a post (only author can delete their own post)
+app.delete('/api/posts/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!id) {
+    return res.status(400).json({ error: 'ID da postagem não fornecido.' });
+  }
+
+  const requesterEmail = (
+    req.body?.userEmail ||
+    req.query?.userEmail ||
+    req.headers['x-user-email'] ||
+    req.body?.authorEmail ||
+    req.body?.author?.email ||
+    ''
+  ).toString().trim().toLowerCase();
+
+  const requesterId = (
+    req.body?.userId ||
+    req.query?.userId ||
+    req.headers['x-user-id'] ||
+    req.body?.author?.id ||
+    ''
+  ).toString().trim();
+
+  if (!requesterEmail && !requesterId) {
+    return res.status(401).json({ error: 'Identificação do usuário não fornecida.' });
+  }
+
+  try {
+    let queryId;
+    if (ObjectId.isValid(id)) {
+      queryId = new ObjectId(id);
+    } else {
+      queryId = id;
+    }
+
+    const post = await postsCollection.findOne({
+      $or: [{ _id: queryId }, { _id: id }]
+    });
+
+    if (!post) {
+      return res.status(404).json({ error: 'Postagem não encontrada.' });
+    }
+
+    let postAuthorEmail = '';
+    let postAuthorId = '';
+    if (typeof post.author === 'string') {
+      postAuthorEmail = post.author.trim().toLowerCase();
+    } else if (post.author && typeof post.author === 'object') {
+      postAuthorEmail = (post.author.email || '').toString().trim().toLowerCase();
+      postAuthorId = (post.author.id || post.author._id || '').toString().trim();
+    }
+
+    const isAuthor =
+      (Boolean(postAuthorEmail) && Boolean(requesterEmail) && postAuthorEmail === requesterEmail) ||
+      (Boolean(postAuthorId) && Boolean(requesterId) && postAuthorId === requesterId);
+
+    if (!isAuthor) {
+      return res.status(403).json({ error: 'Você só pode excluir suas próprias postagens.' });
+    }
+
+    await postsCollection.deleteOne({ _id: post._id });
+
+    // Se for post principal, remove também as respostas vinculadas
+    await postsCollection.deleteMany({
+      $or: [
+        { parentId: id },
+        { parentId: String(post._id) },
+        ...(ObjectId.isValid(id) ? [{ parentId: new ObjectId(id) }] : [])
+      ]
+    });
+
+    res.json({ message: 'Postagem excluída com sucesso.', id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

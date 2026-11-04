@@ -650,7 +650,46 @@
 }
 
 .post-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 12px;
+}
+
+.reply-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.btn-delete-post {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.btn-delete-post:hover {
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.12);
+}
+
+.btn-delete-post .material-symbols-outlined {
+  font-size: 20px;
+}
+
+.btn-delete-reply .material-symbols-outlined {
+  font-size: 18px;
 }
 
 .author-info,
