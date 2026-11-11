@@ -22,9 +22,15 @@ O app funciona como PWA (híbrido). Dá para usar no navegador e também instala
 
 ## Como rodar
 
-```
+```cmd
 npm install
 npm run dev
+```
+
+## Como rodar os testes
+
+```cmd
+npm test
 ```
 
 O front abre em `http://localhost:5173` e a API em `http://localhost:3001`.

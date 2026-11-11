@@ -23,6 +23,15 @@ function Icon({ name, filled = false, className = '' }) {
 
 function MediaPickers({ onChange, mode = 'media' }) {
   const photoOnly = mode === 'photo'
+
+  const handleCameraClick = (e) => {
+    // Janela de confirmação antes de abrir a câmera nativa
+    const confirmar = window.confirm("Deseja realmente abrir a câmera do dispositivo para capturar a imagem do desafio?");
+    if (!confirmar) {
+      e.preventDefault(); // Cancela a abertura da câmera se o usuário recusar
+    }
+  }
+
   return (
     <div className="media-actions">
       <div className="upload-btn-wrapper">
@@ -35,7 +44,14 @@ function MediaPickers({ onChange, mode = 'media' }) {
         <button type="button" className="btn-secondary">
           <Icon name="photo_camera" /> Tirar foto
         </button>
-        <input type="file" accept="image/*" capture="environment" onChange={onChange} />
+        {/* Adicionamos o evento onClick para interceptar e pedir confirmação */}
+        <input 
+          type="file" 
+          accept="image/*" 
+          capture="environment" 
+          onChange={onChange} 
+          onClick={handleCameraClick} 
+        />
       </div>
       {!photoOnly && (
         <div className="upload-btn-wrapper">
@@ -1200,7 +1216,7 @@ const handleRegister = async (e) => {
                 </>
               )}
 
-              {currentView === 'create' && (
+  {currentView === 'create' && (
                 <form className="create-screen" onSubmit={handleCreatePost}>
                   <div className="create-top">
                     <button type="button" className="icon-round" onClick={() => openAppView('dashboard')} aria-label="Fechar">
@@ -1222,24 +1238,39 @@ const handleRegister = async (e) => {
 
                   <section className="create-block">
                     <div className="block-label-row">
-                      <span className="block-label">Foto ou vídeo</span>
+                      <span className="block-label">Foto ou vídeo (Recurso Nativo)</span>
                       <span className="hint">Até 5MB</span>
                     </div>
+
+                    {/* Prévia da Mídia Capturada (Caminho principal / Transição de estados) */}
                     {postMedia && (
-                      <div className="media-preview">
+                      <div className="media-preview" style={{ marginBottom: '15px', textAlign: 'center' }}>
                         {postMediaType === 'video' ? (
-                          <video src={postMedia} controls />
+                          <video src={postMedia} controls style={{ width: '100%', maxHeight: '200px', borderRadius: '8px' }} />
                         ) : (
-                          <img src={postMedia} alt="Preview" />
+                          <img src={postMedia} alt="Prévia da captura" style={{ width: '100%', maxHeight: '200px', objectFit: 'contain', borderRadius: '8px' }} />
                         )}
-                        <button type="button" onClick={() => { setPostMedia(null); setPostMediaType('') }}>Remover</button>
+                        <div style={{ display: 'flex', gap: '10px', marginTop: '10px', justifyContent: 'center' }}>
+                          <button 
+                            type="button" 
+                            className="btn-secondary" 
+                            onClick={() => { setPostMedia(null); setPostMediaType(''); }}
+                            style={{ flex: 1 }}
+                          >
+                            <Icon name="refresh" /> Refazer / Cancelar
+                          </button>
+                        </div>
                       </div>
                     )}
-                    <div className="upload-drop">
-                      <Icon name="photo_camera" />
-                      <p>Galeria, câmera ou gravação</p>
-                      <MediaPickers onChange={handleMediaUpload} />
-                    </div>
+
+                    {/* Botões nativos de Câmera e Galeria */}
+                    {!postMedia && (
+                      <div className="upload-drop">
+                        <Icon name="photo_camera" />
+                        <p>Tirar foto, gravar ou escolher da galeria</p>
+                        <MediaPickers onChange={handleMediaUpload} />
+                      </div>
+                    )}
                   </section>
 
                   <section className="create-block">
