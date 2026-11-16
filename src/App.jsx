@@ -170,6 +170,23 @@ function App() {
   const [showPassword, setShowPassword] = useState(false)
   const [showQR, setShowQR] = useState(false)
   const [feedFilter, setFeedFilter] = useState('all')
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false)
+  const [subscribedUsers, setSubscribedUsers] = useState(() => {
+    try {
+      const cached = localStorage.getItem('desafiox_subscribed_users')
+      return cached ? JSON.parse(cached) : []
+    } catch {
+      return []
+    }
+  })
+  const [notifications, setNotifications] = useState(() => {
+    try {
+      const cached = localStorage.getItem('desafiox_notifications')
+      return cached ? JSON.parse(cached) : []
+    } catch {
+      return []
+    }
+  })
   const [editingProfile, setEditingProfile] = useState(false)
   const [profileName, setProfileName] = useState('')
   const [profileAvatar, setProfileAvatar] = useState(null)
@@ -352,6 +369,190 @@ function App() {
       window.removeEventListener('offline', handleOffline)
     }
   }, [addToast, syncOfflineQueue])
+
+  // Subscriptions & Notifications logic
+  const toggleNotificationSubscription = async (targetUser) => {
+    if (!currentUser) {
+      addToast('Faça login para receber notificações.', 'warning')
+      return
+    }
+
+    const targetEmail = targetUser?.email?.trim().toLowerCase()
+    if (!targetEmail) return
+
+    if (targetEmail === currentUser.email?.trim().toLowerCase()) {
+      addToast('Você não pode ativar notificações para si mesmo.', 'info')
+      return
+    }
+
+    // Solicita permissão nativa para notificações do navegador se ainda não concedida
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      try {
+        await Notification.requestPermission()
+      } catch {
+        // Ignora caso negado
+      }
+    }
+
+    const isSubscribed = subscribedUsers.includes(targetEmail)
+    const newSubscribed = isSubscribed
+      ? subscribedUsers.filter(e => e !== targetEmail)
+      : [...subscribedUsers, targetEmail]
+
+    setSubscribedUsers(newSubscribed)
+    try {
+      localStorage.setItem('desafiox_subscribed_users', JSON.stringify(newSubscribed))
+    } catch (e) {
+      console.warn('Erro ao salvar inscrições no localStorage:', e)
+    }
+
+    if (!navigator.onLine) {
+      addToast(
+        isSubscribed
+          ? `Notificações de ${targetUser.name || targetEmail} desativadas offline.`
+          : `Notificações de ${targetUser.name || targetEmail} ativadas offline!`,
+        'info'
+      )
+      return
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/api/notifications/subscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subscriberEmail: currentUser.email,
+          targetUserEmail: targetEmail,
+          targetUserName: targetUser.name || ''
+        })
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        addToast(data.error || 'Erro ao atualizar notificações.', 'error')
+        setSubscribedUsers(subscribedUsers)
+        return
+      }
+
+      addToast(data.message, data.subscribed ? 'success' : 'info')
+    } catch {
+      addToast('Preferência salva localmente.', 'info')
+    }
+  }
+
+  const markAllNotificationsAsRead = async () => {
+    if (!currentUser) return
+    const updated = notifications.map(n => ({ ...n, read: true }))
+    setNotifications(updated)
+    try {
+      localStorage.setItem('desafiox_notifications', JSON.stringify(updated))
+    } catch (e) {
+      console.warn('Erro ao salvar notificações lidas:', e)
+    }
+
+    if (navigator.onLine) {
+      try {
+        await fetch(`${API_URL}/api/notifications/read`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recipientEmail: currentUser.email, notificationId: 'all' })
+        })
+      } catch (e) {
+        console.warn('Erro ao sincronizar notificações lidas:', e)
+      }
+    }
+  }
+
+  const markSingleNotificationAsRead = async (notif) => {
+    if (!currentUser || !notif) return
+    const updated = notifications.map(n => (n.id === notif.id ? { ...n, read: true } : n))
+    setNotifications(updated)
+    try {
+      localStorage.setItem('desafiox_notifications', JSON.stringify(updated))
+    } catch (e) {
+      console.warn('Erro ao salvar notificação lida:', e)
+    }
+
+    if (navigator.onLine && !notif.read) {
+      try {
+        await fetch(`${API_URL}/api/notifications/read`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recipientEmail: currentUser.email, notificationId: notif.id })
+        })
+      } catch (e) {
+        console.warn('Erro ao atualizar notificação:', e)
+      }
+    }
+  }
+
+  // Polling e carregamento de notificações e inscrições
+  useEffect(() => {
+    if (!currentUser?.email) return
+    let isMounted = true
+
+    const fetchNotifications = async () => {
+      if (!navigator.onLine) return
+      try {
+        const [subsRes, notifsRes] = await Promise.all([
+          fetch(`${API_URL}/api/notifications/subscriptions?subscriberEmail=${encodeURIComponent(currentUser.email)}`),
+          fetch(`${API_URL}/api/notifications?recipientEmail=${encodeURIComponent(currentUser.email)}`)
+        ])
+
+        if (subsRes.ok && isMounted) {
+          const subsData = await subsRes.json()
+          if (Array.isArray(subsData)) {
+            const list = subsData.map(s => s.targetUserEmail)
+            setSubscribedUsers(list)
+            try {
+              localStorage.setItem('desafiox_subscribed_users', JSON.stringify(list))
+            } catch (e) {
+              console.warn(e)
+            }
+          }
+        }
+
+        if (notifsRes.ok && isMounted) {
+          const notifsData = await notifsRes.json()
+          if (Array.isArray(notifsData)) {
+            setNotifications(prev => {
+              const prevIds = new Set(prev.map(n => String(n.id)))
+              const freshUnread = notifsData.filter(n => !n.read && !prevIds.has(String(n.id)))
+              if (freshUnread.length > 0) {
+                const latest = freshUnread[0]
+                addToast(`🔔 ${latest.message}`, 'info')
+                if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+                  try {
+                    new Notification('Desafio X', {
+                      body: latest.message + (latest.postText ? `: "${latest.postText}"` : ''),
+                      icon: '/favicon.svg'
+                    })
+                  } catch {
+                    // Ignora
+                  }
+                }
+              }
+              return notifsData
+            })
+            try {
+              localStorage.setItem('desafiox_notifications', JSON.stringify(notifsData))
+            } catch (e) {
+              console.warn(e)
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao consultar notificações:', err)
+      }
+    }
+
+    fetchNotifications()
+    const timer = setInterval(fetchNotifications, 12000)
+    return () => {
+      isMounted = false
+      clearInterval(timer)
+    }
+  }, [currentUser?.email, addToast])
 
   const clearForm = () => {
     setName('')
@@ -1035,6 +1236,20 @@ const handleRegister = async (e) => {
                 </div>
               </div>
               <div className="top-bar-actions">
+                <button
+                  type="button"
+                  className={`btn-notification-bell ${notifications.filter(n => !n.read).length > 0 ? 'has-unread' : ''}`}
+                  onClick={() => setShowNotificationsModal(true)}
+                  title="Notificações"
+                  aria-label="Abrir notificações"
+                >
+                  <Icon name="notifications" filled={notifications.filter(n => !n.read).length > 0} />
+                  {notifications.filter(n => !n.read).length > 0 && (
+                    <span className="notification-badge">
+                      {notifications.filter(n => !n.read).length > 9 ? '9+' : notifications.filter(n => !n.read).length}
+                    </span>
+                  )}
+                </button>
                 <div className={`telemetry ${isOnline ? 'on' : 'off'} ${isSyncing ? 'sync' : ''}`}>
                   <span className={`status-dot ${isSyncing ? 'dot-syncing' : isOnline ? 'dot-online' : 'dot-offline'}`}></span>
                   <span>{telemetryLabel}</span>
@@ -1088,17 +1303,41 @@ const handleRegister = async (e) => {
                                 <span className="timestamp">{new Date(post.timestamp).toLocaleString()}</span>
                               </div>
                             </div>
-                            {isPostAuthor && (
-                              <button
-                                type="button"
-                                className="btn-delete-post"
-                                onClick={() => handleDeletePost(post)}
-                                title="Excluir desafio"
-                                aria-label="Excluir desafio"
-                              >
-                                <Icon name="delete" />
-                              </button>
-                            )}
+                            <div className="post-header-actions">
+                              {!isPostAuthor && post.author?.email && (
+                                <button
+                                  type="button"
+                                  className={`btn-bell-subscribe ${subscribedUsers.includes(post.author.email.toLowerCase()) ? 'active' : ''}`}
+                                  onClick={() => toggleNotificationSubscription(post.author)}
+                                  title={
+                                    subscribedUsers.includes(post.author.email.toLowerCase())
+                                      ? `Notificações ativadas para ${post.author.name || 'este usuário'}. Clique para desativar.`
+                                      : `Receber notificações quando ${post.author.name || 'este usuário'} postar`
+                                  }
+                                  aria-label={
+                                    subscribedUsers.includes(post.author.email.toLowerCase())
+                                      ? `Desativar notificações de ${post.author.name || 'este usuário'}`
+                                      : `Ativar notificações de ${post.author.name || 'este usuário'}`
+                                  }
+                                >
+                                  <Icon
+                                    name={subscribedUsers.includes(post.author.email.toLowerCase()) ? 'notifications_active' : 'notifications_none'}
+                                    filled={subscribedUsers.includes(post.author.email.toLowerCase())}
+                                  />
+                                </button>
+                              )}
+                              {isPostAuthor && (
+                                <button
+                                  type="button"
+                                  className="btn-delete-post"
+                                  onClick={() => handleDeletePost(post)}
+                                  title="Excluir desafio"
+                                  aria-label="Excluir desafio"
+                                >
+                                  <Icon name="delete" />
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           {post.taggedUsers && post.taggedUsers.length > 0 && (
@@ -1378,6 +1617,109 @@ const handleRegister = async (e) => {
               </div>
             </nav>
           </>
+        )}
+
+        {showNotificationsModal && (
+          <div className="modal-backdrop" onClick={() => setShowNotificationsModal(false)}>
+            <div className="notifications-sheet" onClick={(e) => e.stopPropagation()}>
+              <div className="notifications-header">
+                <div className="notifications-title-row">
+                  <div className="notifications-title">
+                    <Icon name="notifications" filled />
+                    <h2>Notificações</h2>
+                    {notifications.filter(n => !n.read).length > 0 && (
+                      <span className="notifications-counter">
+                        {notifications.filter(n => !n.read).length} novas
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="icon-round"
+                    onClick={() => setShowNotificationsModal(false)}
+                    aria-label="Fechar notificações"
+                  >
+                    <Icon name="close" />
+                  </button>
+                </div>
+
+                {notifications.length > 0 && notifications.some(n => !n.read) && (
+                  <button
+                    type="button"
+                    className="btn-mark-all-read"
+                    onClick={markAllNotificationsAsRead}
+                  >
+                    <Icon name="done_all" /> Marcar todas como lidas
+                  </button>
+                )}
+              </div>
+
+              <div className="notifications-body">
+                {subscribedUsers.length > 0 && (
+                  <div className="notifications-subscriptions-info">
+                    <span className="subscriptions-info-label">
+                      <Icon name="notifications_active" /> Sinos ativados ({subscribedUsers.length}):
+                    </span>
+                    <div className="subscriptions-chips">
+                      {subscribedUsers.map(email => {
+                        const u = users.find(user => user.email === email)
+                        return (
+                          <span key={email} className="sub-chip">
+                            {u?.name || email}
+                            <button
+                              type="button"
+                              onClick={() => toggleNotificationSubscription(u || { email, name: email })}
+                              title="Desativar notificações deste usuário"
+                            >
+                              &times;
+                            </button>
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {notifications.length === 0 ? (
+                  <div className="empty-notifications">
+                    <Icon name="notifications_off" />
+                    <p>Nenhuma notificação por aqui.</p>
+                    <small>
+                      Toque no sininho (🔔) nas postagens de outros usuários para ser avisado sempre que eles publicarem um novo desafio!
+                    </small>
+                  </div>
+                ) : (
+                  <div className="notifications-list">
+                    {notifications.map(notif => (
+                      <div
+                        key={notif.id}
+                        className={`notification-item ${!notif.read ? 'unread' : ''}`}
+                        onClick={() => {
+                          markSingleNotificationAsRead(notif)
+                          setShowNotificationsModal(false)
+                          setFeedFilter('all')
+                        }}
+                      >
+                        <UserAvatar user={{ name: notif.senderName, email: notif.senderEmail, avatar: notif.senderAvatar }} size="avatar-sm" />
+                        <div className="notification-content">
+                          <div className="notification-msg">
+                            <strong>{notif.senderName}</strong> {notif.message.replace(/^.*?publicou/, 'publicou')}
+                          </div>
+                          {notif.postText && (
+                            <p className="notification-preview">"{notif.postText}"</p>
+                          )}
+                          <span className="notification-time">
+                            {new Date(notif.timestamp).toLocaleString()}
+                          </span>
+                        </div>
+                        {!notif.read && <span className="unread-dot" />}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         )}
       </div>
 

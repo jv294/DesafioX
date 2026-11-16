@@ -19,6 +19,8 @@ let client = null;
 let clientPromise = null;
 let usersCollection = null;
 let postsCollection = null;
+let subscriptionsCollection = null;
+let notificationsCollection = null;
 
 async function ensureDbConnected() {
   const rawUri = process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGODB_URL || process.env.DATABASE_URL;
@@ -51,6 +53,8 @@ async function ensureDbConnected() {
     const db = client.db(dbName);
     usersCollection = db.collection('users');
     postsCollection = db.collection('posts');
+    subscriptionsCollection = db.collection('subscriptions');
+    notificationsCollection = db.collection('notifications');
     try {
       await usersCollection.createIndex({ email: 1 }, { unique: true });
     } catch {
@@ -282,6 +286,131 @@ app.delete('/api/posts/:id', async (req, res) => {
     });
 
     res.json({ message: 'Postagem excluída com sucesso.', id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// Alternar inscrição de notificações para um usuário específico
+app.post('/api/notifications/subscribe', async (req, res) => {
+  const subscriberEmail = (req.body?.subscriberEmail || '').trim().toLowerCase();
+  const targetUserEmail = (req.body?.targetUserEmail || '').trim().toLowerCase();
+  const targetUserName = (req.body?.targetUserName || '').trim();
+
+  if (!subscriberEmail || !targetUserEmail) {
+    return res.status(400).json({ error: 'E-mails do assinante e do usuário alvo são obrigatórios.' });
+  }
+
+  if (subscriberEmail === targetUserEmail) {
+    return res.status(400).json({ error: 'Você não pode ativar notificações para si mesmo.' });
+  }
+
+  try {
+    const existing = await subscriptionsCollection.findOne({
+      subscriberEmail,
+      targetUserEmail
+    });
+
+    if (existing) {
+      await subscriptionsCollection.deleteOne({ _id: existing._id });
+      return res.json({
+        subscribed: false,
+        targetUserEmail,
+        message: `Notificações desativadas para ${targetUserName || targetUserEmail}.`
+      });
+    } else {
+      await subscriptionsCollection.insertOne({
+        subscriberEmail,
+        targetUserEmail,
+        targetUserName,
+        createdAt: new Date().toISOString()
+      });
+      return res.json({
+        subscribed: true,
+        targetUserEmail,
+        message: `Notificações ativadas para ${targetUserName || targetUserEmail}!`
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Listar para quais usuários o assinante ativou notificações
+app.get('/api/notifications/subscriptions', async (req, res) => {
+  const subscriberEmail = (req.query?.subscriberEmail || '').trim().toLowerCase();
+  if (!subscriberEmail) {
+    return res.status(400).json({ error: 'E-mail do assinante não fornecido.' });
+  }
+
+  try {
+    const subs = await subscriptionsCollection.find({ subscriberEmail }).toArray();
+    res.json(subs.map(s => ({
+      targetUserEmail: s.targetUserEmail,
+      targetUserName: s.targetUserName || s.targetUserEmail
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Listar notificações recebidas pelo usuário logado
+app.get('/api/notifications', async (req, res) => {
+  const recipientEmail = (req.query?.recipientEmail || '').trim().toLowerCase();
+  if (!recipientEmail) {
+    return res.status(400).json({ error: 'E-mail do destinatário não fornecido.' });
+  }
+
+  try {
+    const notifications = await notificationsCollection
+      .find({ recipientEmail })
+      .sort({ timestamp: -1 })
+      .limit(40)
+      .toArray();
+
+    res.json(notifications.map(n => ({
+      id: n._id,
+      recipientEmail: n.recipientEmail,
+      senderEmail: n.senderEmail,
+      senderName: n.senderName,
+      senderAvatar: n.senderAvatar,
+      postId: n.postId,
+      postText: n.postText,
+      type: n.type,
+      message: n.message,
+      read: Boolean(n.read),
+      timestamp: n.timestamp
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Marcar notificações como lidas
+app.put('/api/notifications/read', async (req, res) => {
+  const recipientEmail = (req.body?.recipientEmail || '').trim().toLowerCase();
+  const notificationId = req.body?.notificationId;
+
+  if (!recipientEmail) {
+    return res.status(400).json({ error: 'E-mail do destinatário não fornecido.' });
+  }
+
+  try {
+    if (notificationId && notificationId !== 'all') {
+      const qId = ObjectId.isValid(notificationId) ? new ObjectId(notificationId) : notificationId;
+      await notificationsCollection.updateOne(
+        { $or: [{ _id: qId }, { _id: notificationId }], recipientEmail },
+        { $set: { read: true } }
+      );
+    } else {
+      await notificationsCollection.updateMany(
+        { recipientEmail, read: false },
+        { $set: { read: true } }
+      );
+    }
+
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
