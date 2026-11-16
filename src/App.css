@@ -1577,3 +1577,24 @@
   flex-shrink: 0;
   margin-top: 5px;
 }
+
+.mention-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(0, 226, 151, 0.15);
+  border: 1px solid rgba(0, 226, 151, 0.35);
+  color: var(--mint);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.mention-badge .material-symbols-outlined {
+  font-size: 12px;
+}

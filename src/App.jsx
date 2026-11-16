@@ -1703,7 +1703,13 @@ const handleRegister = async (e) => {
                         <UserAvatar user={{ name: notif.senderName, email: notif.senderEmail, avatar: notif.senderAvatar }} size="avatar-sm" />
                         <div className="notification-content">
                           <div className="notification-msg">
-                            <strong>{notif.senderName}</strong> {notif.message.replace(/^.*?publicou/, 'publicou')}
+                            {notif.type === 'mention' && (
+                              <span className="mention-badge">
+                                <Icon name="alternate_email" /> Marcado
+                              </span>
+                            )}
+                            <strong>{notif.senderName}</strong>{' '}
+                            {notif.type === 'mention' ? notif.message.replace(/^.*?marcou/, 'marcou') : notif.message.replace(/^.*?publicou/, 'publicou')}
                           </div>
                           {notif.postText && (
                             <p className="notification-preview">"{notif.postText}"</p>

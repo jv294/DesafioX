@@ -220,6 +220,91 @@ app.post('/api/posts', async (req, res) => {
       timestamp: timestamp || new Date().toISOString()
     };
     const result = await postsCollection.insertOne(newPost);
+
+    // Disparar notificações para usuários marcados (menções) e assinantes
+    try {
+      const authorEmail = (author.email || '').trim().toLowerCase();
+      if (authorEmail && notificationsCollection) {
+        const notificationsToInsert = [];
+        const notifiedEmails = new Set();
+
+        // 1. Identificar usuários marcados (taggedUsers)
+        const taggedEmails = new Set();
+        if (Array.isArray(taggedUsers)) {
+          for (const tu of taggedUsers) {
+            const email = (typeof tu === 'string' ? tu : tu?.email || '').trim().toLowerCase();
+            if (email && email !== authorEmail) {
+              taggedEmails.add(email);
+            }
+          }
+        }
+
+        // Também detectar menções por @ no texto (ex: @email ou @nome)
+        if (text && typeof text === 'string' && text.includes('@') && usersCollection) {
+          try {
+            const allUsers = await usersCollection.find({}, { projection: { email: 1, name: 1 } }).toArray();
+            for (const u of allUsers) {
+              if (!u.email || u.email.toLowerCase() === authorEmail) continue;
+              const uEmail = u.email.toLowerCase();
+              const uNameClean = (u.name || '').trim().toLowerCase().replace(/\s+/g, '');
+              const textClean = text.toLowerCase().replace(/\s+/g, '');
+              if (text.toLowerCase().includes(`@${uEmail}`) || (uNameClean && textClean.includes(`@${uNameClean}`))) {
+                taggedEmails.add(uEmail);
+              }
+            }
+          } catch (mentionErr) {
+            console.warn('Erro ao checar menções no texto:', mentionErr);
+          }
+        }
+
+        // Criar notificação para cada usuário marcado
+        for (const taggedEmail of taggedEmails) {
+          notificationsToInsert.push({
+            recipientEmail: taggedEmail,
+            senderEmail: authorEmail,
+            senderName: author.name || 'Alguém',
+            senderAvatar: author.avatar || null,
+            postId: String(result.insertedId),
+            postText: (text || '').trim().slice(0, 100),
+            type: 'mention',
+            message: `${author.name || 'Um amigo'} marcou você em um ${parentId ? 'comentário' : 'desafio'}!`,
+            read: false,
+            timestamp: new Date().toISOString()
+          });
+          notifiedEmails.add(taggedEmail);
+        }
+
+        // 2. Criar notificação para assinantes que acompanham o autor (caso ainda não tenham sido marcados)
+        if (subscriptionsCollection) {
+          const subscribers = await subscriptionsCollection.find({ targetUserEmail: authorEmail }).toArray();
+          for (const sub of subscribers) {
+            const subEmail = (sub.subscriberEmail || '').trim().toLowerCase();
+            if (subEmail && subEmail !== authorEmail && !notifiedEmails.has(subEmail)) {
+              notificationsToInsert.push({
+                recipientEmail: subEmail,
+                senderEmail: authorEmail,
+                senderName: author.name || 'Alguém',
+                senderAvatar: author.avatar || null,
+                postId: String(result.insertedId),
+                postText: (text || '').trim().slice(0, 100),
+                type: parentId ? 'reply' : 'post',
+                message: `${author.name || 'Um usuário'} publicou ${parentId ? 'uma resposta' : 'um novo desafio'}!`,
+                read: false,
+                timestamp: new Date().toISOString()
+              });
+              notifiedEmails.add(subEmail);
+            }
+          }
+        }
+
+        if (notificationsToInsert.length > 0) {
+          await notificationsCollection.insertMany(notificationsToInsert);
+        }
+      }
+    } catch (notifErr) {
+      console.warn('Falha silenciosa ao registrar notificações:', notifErr.message);
+    }
+
     res.status(201).json({ id: result.insertedId, ...newPost });
   } catch (err) {
     res.status(500).json({ error: err.message });
