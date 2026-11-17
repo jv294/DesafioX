@@ -21,6 +21,7 @@ let usersCollection = null;
 let postsCollection = null;
 let subscriptionsCollection = null;
 let notificationsCollection = null;
+let friendsCollection = null;
 
 async function ensureDbConnected() {
   const rawUri = process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGODB_URL || process.env.DATABASE_URL;
@@ -55,11 +56,23 @@ async function ensureDbConnected() {
     postsCollection = db.collection('posts');
     subscriptionsCollection = db.collection('subscriptions');
     notificationsCollection = db.collection('notifications');
+    friendsCollection = db.collection('friends');
     try {
       await usersCollection.createIndex({ email: 1 }, { unique: true });
     } catch {
       // Índice já existe ou ignorar erro transitório
     }
+    try {
+      await friendsCollection.createIndex({ requesterEmail: 1, addresseeEmail: 1 }, { unique: true });
+    } catch {
+      // índice já existe
+    }
+  }
+
+  if (!friendsCollection) {
+    const dbName = process.env.MONGODB_DBNAME || 'app';
+    const db = client.db(dbName);
+    friendsCollection = db.collection('friends');
   }
 }
 
@@ -170,20 +183,69 @@ app.put('/api/profile', async (req, res) => {
   }
 });
 
-// Get all posts
+async function listFriendEmailsFor(email) {
+  const normalized = (email || '').trim().toLowerCase();
+  const set = new Set();
+  if (!normalized || !friendsCollection) return set;
+  const docs = await friendsCollection.find({ status: 'accepted' }).toArray();
+  for (const doc of docs) {
+    const req = (doc.requesterEmail || '').toLowerCase();
+    const add = (doc.addresseeEmail || '').toLowerCase();
+    if (req === normalized && add) set.add(add);
+    if (add === normalized && req) set.add(req);
+  }
+  return set;
+}
+
+function viewerCanSeePost(post, viewerEmail, friendEmails) {
+  const viewer = (viewerEmail || '').toLowerCase();
+  const author = (post.author?.email || '').toLowerCase();
+  const audience = post.audience || 'public';
+  const tagged = (post.taggedUsers || []).some((u) => (u.email || '').toLowerCase() === viewer);
+
+  if (!viewer) return audience === 'public';
+  if (author === viewer) return true;
+  if (audience === 'public') return true;
+  if (audience === 'friends') return friendEmails.has(author) || tagged;
+  if (audience === 'direct') return tagged;
+  return false;
+}
+
+function mapPost(post) {
+  return {
+    id: post._id,
+    parentId: post.parentId || null,
+    author: post.author,
+    text: post.text,
+    media: post.media,
+    mediaType: post.mediaType,
+    taggedUsers: post.taggedUsers,
+    timestamp: post.timestamp,
+    audience: post.audience || 'public'
+  };
+}
+
 app.get('/api/posts', async (req, res) => {
   try {
+    const viewerEmail = (req.query?.viewerEmail || '').trim().toLowerCase();
     const posts = await postsCollection.find({}).sort({ timestamp: -1 }).toArray();
-    res.json(posts.map(post => ({
-      id: post._id,
-      parentId: post.parentId || null,
-      author: post.author,
-      text: post.text,
-      media: post.media,
-      mediaType: post.mediaType,
-      taggedUsers: post.taggedUsers,
-      timestamp: post.timestamp
-    })));
+    const mapped = posts.map(mapPost);
+    const friendEmails = await listFriendEmailsFor(viewerEmail);
+    const allowed = new Set();
+
+    for (const post of mapped) {
+      if (post.parentId) continue;
+      if (viewerCanSeePost(post, viewerEmail, friendEmails)) {
+        allowed.add(String(post.id));
+      }
+    }
+    for (const post of mapped) {
+      if (post.parentId && allowed.has(String(post.parentId))) {
+        allowed.add(String(post.id));
+      }
+    }
+
+    res.json(mapped.filter((post) => allowed.has(String(post.id))));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -191,20 +253,30 @@ app.get('/api/posts', async (req, res) => {
 
 // Create a post
 app.post('/api/posts', async (req, res) => {
-  const { author, text, media, mediaType, taggedUsers, timestamp, parentId } = req.body;
+  const { author, text, media, mediaType, taggedUsers, timestamp, parentId, audience } = req.body;
   if (!author) {
     return res.status(400).json({ error: 'Autor do post não fornecido.' });
   }
 
   try {
+    const tagged = taggedUsers || [];
+    let postAudience = audience;
+    if (!['public', 'friends', 'direct'].includes(postAudience)) {
+      postAudience = tagged.length > 0 ? 'direct' : 'friends';
+    }
+    if (postAudience === 'direct' && tagged.length === 0) {
+      postAudience = 'friends';
+    }
+
     const newPost = {
       parentId: parentId || null,
       author,
       text: text || '',
       media: media || null,
       mediaType: mediaType || '',
-      taggedUsers: taggedUsers || [],
-      timestamp: timestamp || new Date().toISOString()
+      taggedUsers: tagged,
+      timestamp: timestamp || new Date().toISOString(),
+      audience: postAudience
     };
     const result = await postsCollection.insertOne(newPost);
 
@@ -496,6 +568,262 @@ app.put('/api/notifications/read', async (req, res) => {
     }
 
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function publicFriendUser(user) {
+  return {
+    id: String(user._id),
+    name: user.name,
+    email: user.email,
+    avatar: user.avatar || null
+  };
+}
+
+async function findUserByFriendId(friendId) {
+  const value = String(friendId || '').trim();
+  if (!value) return null;
+  if (ObjectId.isValid(value) && value.length === 24) {
+    const byId = await usersCollection.findOne({ _id: new ObjectId(value) });
+    if (byId) return byId;
+  }
+  return usersCollection.findOne({ email: value.toLowerCase() });
+}
+
+async function usersByEmails(emails) {
+  const list = [...new Set(emails.filter(Boolean).map((e) => e.toLowerCase()))];
+  if (list.length === 0) return {};
+  const found = await usersCollection.find(
+    { email: { $in: list } },
+    { projection: { _id: 1, name: 1, email: 1, avatar: 1 } }
+  ).toArray();
+  const map = {};
+  for (const user of found) {
+    map[user.email.toLowerCase()] = publicFriendUser(user);
+  }
+  return map;
+}
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function findUserByEmail(email) {
+  const value = String(email || '').trim();
+  if (!value) return null;
+  return usersCollection.findOne({
+    email: { $regex: `^${escapeRegex(value)}$`, $options: 'i' }
+  });
+}
+
+async function findFriendship(emailA, emailB) {
+  const a = String(emailA || '').toLowerCase();
+  const b = String(emailB || '').toLowerCase();
+  const docs = await friendsCollection.find({
+    $or: [
+      { requesterEmail: a, addresseeEmail: b },
+      { requesterEmail: b, addresseeEmail: a }
+    ]
+  }).toArray();
+  if (docs.length > 0) return docs[0];
+  const all = await friendsCollection.find({}).toArray();
+  return all.find((doc) => {
+    const req = (doc.requesterEmail || '').toLowerCase();
+    const add = (doc.addresseeEmail || '').toLowerCase();
+    return (req === a && add === b) || (req === b && add === a);
+  }) || null;
+}
+
+app.get('/api/friends', async (req, res) => {
+  const email = (req.query?.email || '').trim().toLowerCase();
+  if (!email) {
+    return res.status(400).json({ error: 'E-mail do usuário não informado.' });
+  }
+
+  try {
+    const me = await findUserByEmail(email);
+    const myId = me ? String(me._id) : '';
+    const myEmails = new Set([email, (me?.email || '').toLowerCase()].filter(Boolean));
+
+    const docs = await friendsCollection.find({
+      $or: [
+        { requesterEmail: email },
+        { addresseeEmail: email },
+        { requesterEmail: me?.email },
+        { addresseeEmail: me?.email },
+        ...(myId ? [{ requesterId: myId }, { addresseeId: myId }] : [])
+      ]
+    }).sort({ createdAt: -1 }).toArray();
+
+    const visibleDocs = docs.filter((doc) => {
+      const req = (doc.requesterEmail || '').toLowerCase();
+      const add = (doc.addresseeEmail || '').toLowerCase();
+      return myEmails.has(req) || myEmails.has(add) || doc.requesterId === myId || doc.addresseeId === myId;
+    });
+
+    const isMeRequester = (doc) => {
+      const req = (doc.requesterEmail || '').toLowerCase();
+      return myEmails.has(req) || (myId && doc.requesterId === myId);
+    };
+
+    const otherEmails = visibleDocs.map((doc) => (
+      isMeRequester(doc) ? doc.addresseeEmail : doc.requesterEmail
+    ));
+    const map = await usersByEmails(otherEmails);
+
+    const toItem = (doc) => {
+      const otherEmail = isMeRequester(doc) ? doc.addresseeEmail : doc.requesterEmail;
+      const otherKey = (otherEmail || '').toLowerCase();
+      return {
+        id: String(doc._id),
+        status: doc.status,
+        incoming: doc.status === 'pending' && !isMeRequester(doc),
+        user: map[otherKey] || map[otherEmail] || { id: '', name: otherEmail, email: otherEmail, avatar: null },
+        createdAt: doc.createdAt
+      };
+    };
+
+    res.json({
+      friends: visibleDocs.filter((d) => d.status === 'accepted').map(toItem),
+      incoming: visibleDocs.filter((d) => d.status === 'pending' && !isMeRequester(d)).map(toItem),
+      outgoing: visibleDocs.filter((d) => d.status === 'pending' && isMeRequester(d)).map(toItem)
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/friends/request', async (req, res) => {
+  const fromEmail = (req.body?.fromEmail || '').trim().toLowerCase();
+  const friendId = (req.body?.friendId || req.body?.toId || '').trim();
+
+  if (!fromEmail || !friendId) {
+    return res.status(400).json({ error: 'Informe seu e-mail e o ID do amigo.' });
+  }
+
+  try {
+    const fromUser = await findUserByEmail(fromEmail);
+    if (!fromUser) {
+      return res.status(404).json({ error: 'Usuário logado não encontrado.' });
+    }
+
+    const toUser = await findUserByFriendId(friendId);
+    if (!toUser) {
+      return res.status(404).json({ error: 'Nenhum usuário encontrado com esse ID.' });
+    }
+
+    const toEmail = (toUser.email || '').toLowerCase();
+    if (toEmail === fromEmail) {
+      return res.status(400).json({ error: 'Você não pode adicionar a si mesmo.' });
+    }
+
+    const existing = await findFriendship(fromEmail, toEmail);
+    if (existing?.status === 'accepted') {
+      return res.status(400).json({ error: 'Vocês já são amigos.' });
+    }
+    if (existing?.status === 'pending' && existing.requesterEmail === fromEmail) {
+      return res.status(400).json({ error: 'Solicitação já enviada. Aguarde a resposta.' });
+    }
+    if (existing?.status === 'pending' && existing.addresseeEmail === fromEmail) {
+      await friendsCollection.updateOne(
+        { _id: existing._id },
+        { $set: { status: 'accepted', respondedAt: new Date().toISOString() } }
+      );
+      return res.json({
+        message: `${toUser.name} já tinha te enviado um convite. Vocês agora são amigos.`,
+        autoAccepted: true
+      });
+    }
+
+    await friendsCollection.insertOne({
+      requesterEmail: fromEmail,
+      addresseeEmail: toEmail,
+      requesterId: String(fromUser._id),
+      addresseeId: String(toUser._id),
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    });
+
+    if (notificationsCollection) {
+      await notificationsCollection.insertOne({
+        recipientEmail: toEmail,
+        senderEmail: fromEmail,
+        senderName: fromUser.name || 'Alguém',
+        senderAvatar: fromUser.avatar || null,
+        postId: null,
+        postText: '',
+        type: 'friend_request',
+        message: `${fromUser.name || 'Alguém'} enviou uma solicitação de amizade.`,
+        read: false,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    res.status(201).json({ message: `Solicitação enviada para ${toUser.name}.` });
+  } catch (err) {
+    if (err.code === 11000) {
+      return res.status(400).json({ error: 'Solicitação já enviada.' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/friends/respond', async (req, res) => {
+  const email = (req.body?.email || '').trim().toLowerCase();
+  const requestId = req.body?.requestId;
+  const action = (req.body?.action || '').trim().toLowerCase();
+
+  if (!email || !requestId || !['accept', 'reject'].includes(action)) {
+    return res.status(400).json({ error: 'Informe o pedido e se deseja aceitar ou recusar.' });
+  }
+
+  try {
+    const qId = ObjectId.isValid(requestId) ? new ObjectId(requestId) : requestId;
+    const me = await findUserByEmail(email);
+    const myId = me ? String(me._id) : '';
+    const doc = await friendsCollection.findOne({ _id: qId, status: 'pending' });
+    const addressee = (doc?.addresseeEmail || '').toLowerCase();
+    const isAddressee = doc && (addressee === email || (myId && doc.addresseeId === myId) || (me?.email && addressee === me.email.toLowerCase()));
+    if (!isAddressee) {
+      return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    }
+
+    if (action === 'reject') {
+      await friendsCollection.deleteOne({ _id: doc._id });
+      return res.json({ message: 'Solicitação recusada.' });
+    }
+
+    await friendsCollection.updateOne(
+      { _id: doc._id },
+      { $set: { status: 'accepted', respondedAt: new Date().toISOString() } }
+    );
+    res.json({ message: 'Solicitação aceita. Vocês agora são amigos.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/friends/:id', async (req, res) => {
+  const email = (req.query?.email || req.body?.email || '').trim().toLowerCase();
+  const { id } = req.params;
+  if (!email || !id) {
+    return res.status(400).json({ error: 'Informe o usuário e o ID da amizade.' });
+  }
+
+  try {
+    const qId = ObjectId.isValid(id) ? new ObjectId(id) : id;
+    const doc = await friendsCollection.findOne({
+      _id: qId,
+      $or: [{ requesterEmail: email }, { addresseeEmail: email }]
+    });
+    if (!doc) {
+      return res.status(404).json({ error: 'Amizade não encontrada.' });
+    }
+
+    await friendsCollection.deleteOne({ _id: doc._id });
+    res.json({ message: doc.status === 'accepted' ? 'Amigo removido.' : 'Pedido cancelado.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import QRCode from 'react-qr-code'
+import QRCodePackage from 'react-qr-code'
 import './App.css'
+
+const QRCode = QRCodePackage?.default || QRCodePackage?.QRCode || QRCodePackage
 
 const API_URL = import.meta.env.VITE_API_URL || ''
 const MAX_RETRIES = 5
@@ -190,6 +192,14 @@ function App() {
   const [editingProfile, setEditingProfile] = useState(false)
   const [profileName, setProfileName] = useState('')
   const [profileAvatar, setProfileAvatar] = useState(null)
+  const [friendsTab, setFriendsTab] = useState('all')
+  const [friendsList, setFriendsList] = useState([])
+  const [incomingRequests, setIncomingRequests] = useState([])
+  const [outgoingRequests, setOutgoingRequests] = useState([])
+  const [friendIdInput, setFriendIdInput] = useState('')
+  const [showInviteQR, setShowInviteQR] = useState(false)
+  const [friendFeedEmail, setFriendFeedEmail] = useState('')
+  const [postAudience, setPostAudience] = useState('friends')
 
   const removeToast = useCallback((id) => {
     setToasts(prev => prev.filter(toast => toast.id !== id))
@@ -312,7 +322,8 @@ function App() {
       if (!navigator.onLine) return
 
       try {
-        const postsRes = await fetch(`${API_URL}/api/posts`)
+        const viewer = currentUser?.email ? `?viewerEmail=${encodeURIComponent(currentUser.email)}` : ''
+        const postsRes = await fetch(`${API_URL}/api/posts${viewer}`)
         if (postsRes.ok && isMounted) {
           const postsData = await postsRes.json()
           if (!postsData.error && Array.isArray(postsData)) {
@@ -368,7 +379,17 @@ function App() {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
-  }, [addToast, syncOfflineQueue])
+  }, [addToast, syncOfflineQueue, currentUser?.email])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const addFriend = params.get('addFriend')
+    if (addFriend) {
+      sessionStorage.setItem('desafiox_pending_friend', addFriend)
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [])
 
   // Subscriptions & Notifications logic
   const toggleNotificationSubscription = async (targetUser) => {
@@ -515,6 +536,9 @@ function App() {
         if (notifsRes.ok && isMounted) {
           const notifsData = await notifsRes.json()
           if (Array.isArray(notifsData)) {
+            if (notifsData.some(n => n.type === 'friend_request' && !n.read)) {
+              loadFriends()
+            }
             setNotifications(prev => {
               const prevIds = new Set(prev.map(n => String(n.id)))
               const freshUnread = notifsData.filter(n => !n.read && !prevIds.has(String(n.id)))
@@ -547,7 +571,7 @@ function App() {
     }
 
     fetchNotifications()
-    const timer = setInterval(fetchNotifications, 12000)
+    const timer = setInterval(fetchNotifications, 3000)
     return () => {
       isMounted = false
       clearInterval(timer)
@@ -839,19 +863,24 @@ const handleRegister = async (e) => {
       return
     }
     
+    const tagged = users.filter(u => taggedUsers.includes(u.email))
+    const audience = tagged.length > 0 ? 'direct' : postAudience
+
     const newPostData = {
       author: currentUser,
       text: postText,
       media: postMedia,
       mediaType: postMediaType,
-      taggedUsers: users.filter(u => taggedUsers.includes(u.email)),
-      timestamp: new Date().toISOString()
+      taggedUsers: tagged,
+      timestamp: new Date().toISOString(),
+      audience
     }
 
     setPostText('')
     setPostMedia(null)
     setPostMediaType('')
     setTaggedUsers([])
+    setPostAudience('friends')
 
     if (!navigator.onLine) {
       addToOfflineQueue(newPostData)
@@ -1006,6 +1035,111 @@ const handleRegister = async (e) => {
     }
   }
 
+  const friendId = currentUser?.id != null ? String(currentUser.id) : ''
+  const inviteUrl = friendId
+    ? `${window.location.origin}${window.location.pathname}?addFriend=${encodeURIComponent(friendId)}`
+    : ''
+
+  const loadFriends = useCallback(async () => {
+    if (!currentUser?.email || !navigator.onLine) return
+    try {
+      const response = await fetch(`${API_URL}/api/friends?email=${encodeURIComponent(currentUser.email)}`)
+      const data = await response.json()
+      if (!response.ok) {
+        addToast(data.error || 'Não foi possível carregar os amigos.', 'error')
+        return
+      }
+      setFriendsList(Array.isArray(data.friends) ? data.friends : [])
+      setIncomingRequests(Array.isArray(data.incoming) ? data.incoming : [])
+      setOutgoingRequests(Array.isArray(data.outgoing) ? data.outgoing : [])
+    } catch {
+      addToast('Falha ao carregar amigos. Verifique a conexão.', 'error')
+    }
+  }, [currentUser?.email, addToast])
+
+  const sendFriendRequest = useCallback(async (friendId) => {
+    const target = String(friendId || '').trim()
+    if (!currentUser?.email || !target) return
+    if (!navigator.onLine) {
+      addToast('Para adicionar amigos, conecte-se à internet.', 'warning')
+      return
+    }
+    try {
+      const response = await fetch(`${API_URL}/api/friends/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromEmail: currentUser.email, friendId: target })
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        addToast(data.error || 'Não foi possível enviar a solicitação.', 'error')
+        return
+      }
+      addToast(data.message || 'Solicitação enviada.', 'success')
+      setFriendIdInput('')
+      loadFriends()
+    } catch {
+      addToast('Falha ao enviar solicitação de amizade.', 'error')
+    }
+  }, [currentUser?.email, addToast, loadFriends])
+
+  const respondFriendRequest = async (requestId, action) => {
+    if (!currentUser?.email) return
+    try {
+      const response = await fetch(`${API_URL}/api/friends/respond`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: currentUser.email, requestId, action })
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        addToast(data.error || 'Não foi possível responder a solicitação.', 'error')
+        return
+      }
+      addToast(data.message, 'success')
+      loadFriends()
+    } catch {
+      addToast('Falha ao responder a solicitação.', 'error')
+    }
+  }
+
+  const removeFriendship = async (friendshipId) => {
+    if (!currentUser?.email || !friendshipId) return
+    try {
+      const response = await fetch(`${API_URL}/api/friends/${friendshipId}?email=${encodeURIComponent(currentUser.email)}`, {
+        method: 'DELETE'
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        addToast(data.error || 'Não foi possível remover.', 'error')
+        return
+      }
+      addToast(data.message || 'Removido.', 'info')
+      loadFriends()
+    } catch {
+      addToast('Falha ao remover amizade.', 'error')
+    }
+  }
+
+  const copyInvite = async () => {
+    if (!inviteUrl) return
+    try {
+      await navigator.clipboard.writeText(inviteUrl)
+      addToast('Link de convite copiado.', 'success')
+    } catch {
+      addToast('Não foi possível copiar. Selecione o link e copie.', 'warning')
+    }
+  }
+
+  const copyMyId = async () => {
+    if (!currentUser?.id) return
+    try {
+      await navigator.clipboard.writeText(String(currentUser.id))
+      addToast('Seu ID foi copiado.', 'success')
+    } catch {
+      addToast('Não foi possível copiar o ID.', 'warning')
+    }
+  }
 
   const switchView = (view) => {
     clearForm()
@@ -1013,21 +1147,81 @@ const handleRegister = async (e) => {
     setCurrentView(view)
   }
 
-  const openAppView = (view) => {
+  const openAppView = (view, friendsSection) => {
     setCurrentView(view)
     setActiveReplyId(null)
+    if (view === 'friends') {
+      setFriendsTab(friendsSection || 'all')
+      loadFriends()
+    }
+  }
+
+  const challengeFriend = (friend) => {
+    if (!friend?.email) return
+    setTaggedUsers([friend.email])
+    setPostAudience('direct')
+    openAppView('create')
+    addToast(`Desafio só para ${friend.name}. Ninguém mais vai ver.`, 'info')
+  }
+
+  const viewFriendPosts = (friend) => {
+    setFriendFeedEmail(friend.email)
+    setFeedFilter('friend')
+    openAppView('dashboard')
   }
 
   const comingSoon = (area) => {
     addToast(`${area} entra nas próximas atualizações. Por enquanto use o feed e o criar desafio.`, 'info')
   }
 
+  useEffect(() => {
+    if (!currentUser?.email || !navigator.onLine) return
+    loadFriends()
+    const pending = sessionStorage.getItem('desafiox_pending_friend')
+    if (pending) {
+      sessionStorage.removeItem('desafiox_pending_friend')
+      if (String(pending) !== String(currentUser.id)) {
+        sendFriendRequest(pending)
+        setCurrentView('friends')
+        setFriendsTab('requests')
+      }
+    }
+    const timer = setInterval(loadFriends, 2500)
+    return () => clearInterval(timer)
+  }, [currentUser?.email, currentUser?.id, loadFriends, sendFriendRequest])
+
+  const friendEmails = new Set(
+    friendsList.map(item => item.user?.email?.toLowerCase()).filter(Boolean)
+  )
+  const myEmail = currentUser?.email?.toLowerCase() || ''
+
+  const canSeePost = (post) => {
+    const author = post.author?.email?.toLowerCase() || ''
+    const audience = post.audience || 'public'
+    const tagged = (post.taggedUsers || []).some(u => u.email?.toLowerCase() === myEmail)
+    if (!myEmail) return audience === 'public'
+    if (author === myEmail) return true
+    if (audience === 'public') return true
+    if (audience === 'friends') return friendEmails.has(author) || tagged
+    if (audience === 'direct') return tagged
+    return false
+  }
+
   const parentPosts = posts.filter(p => !p.parentId)
-  const visiblePosts = parentPosts.filter(post => {
-    if (feedFilter === 'mine') return post.author?.email === currentUser?.email
+  const allowedPosts = parentPosts.filter(canSeePost)
+  const visiblePosts = allowedPosts.filter(post => {
+    const taggedMe = (post.taggedUsers || []).some(u => u.email?.toLowerCase() === myEmail)
+    if (feedFilter === 'mine') return post.author?.email?.toLowerCase() === myEmail
     if (feedFilter === 'media') return Boolean(post.media)
+    if (feedFilter === 'friend') return post.author?.email === friendFeedEmail
+    if (feedFilter === 'forme') return taggedMe && post.author?.email?.toLowerCase() !== myEmail
+    if (feedFilter === 'friends') {
+      return post.audience === 'friends' || (friendEmails.has(post.author?.email?.toLowerCase()) && post.audience !== 'public')
+    }
+    if (feedFilter === 'arena') return (post.audience || 'public') === 'public'
     return true
   })
+  const friendFeedUser = users.find(u => u.email === friendFeedEmail)
 
   const telemetryLabel = isSyncing ? 'Sincronizando' : isOnline ? 'Online' : 'Offline'
   const isAppView = Boolean(currentUser)
@@ -1113,7 +1307,11 @@ const handleRegister = async (e) => {
 
               {showQR && (
                 <div className="qr-panel">
-                  <QRCode value={window.location.origin + window.location.pathname} size={180} />
+                  <QRCode
+                    value={window.location.origin + window.location.pathname}
+                    size={180}
+                    style={{ width: 180, height: 180 }}
+                  />
                   <p>Aponte a câmera para<br />instalar o app</p>
                 </div>
               )}
@@ -1268,7 +1466,16 @@ const handleRegister = async (e) => {
                 <>
                   <section className="filter-row" aria-label="Filtros do feed">
                     <button type="button" className={`chip ${feedFilter === 'all' ? 'active' : ''}`} onClick={() => setFeedFilter('all')}>
-                      <Icon name="local_fire_department" filled={feedFilter === 'all'} /> Todos
+                      <Icon name="local_fire_department" filled={feedFilter === 'all'} /> Início
+                    </button>
+                    <button type="button" className={`chip ${feedFilter === 'forme' ? 'active' : ''}`} onClick={() => setFeedFilter('forme')}>
+                      <Icon name="swords" /> Para mim
+                    </button>
+                    <button type="button" className={`chip ${feedFilter === 'friends' ? 'active' : ''}`} onClick={() => setFeedFilter('friends')}>
+                      <Icon name="group" /> Amigos
+                    </button>
+                    <button type="button" className={`chip ${feedFilter === 'arena' ? 'active' : ''}`} onClick={() => setFeedFilter('arena')}>
+                      <Icon name="public" /> Arena
                     </button>
                     <button type="button" className={`chip ${feedFilter === 'media' ? 'active' : ''}`} onClick={() => setFeedFilter('media')}>
                       <Icon name="photo_camera" /> Com mídia
@@ -1276,12 +1483,25 @@ const handleRegister = async (e) => {
                     <button type="button" className={`chip ${feedFilter === 'mine' ? 'active' : ''}`} onClick={() => setFeedFilter('mine')}>
                       <Icon name="person" /> Meus
                     </button>
+                    {friendFeedEmail && (
+                      <button type="button" className={`chip ${feedFilter === 'friend' ? 'active' : ''}`} onClick={() => setFeedFilter('friend')}>
+                        <Icon name="group" /> {friendFeedUser?.name || 'Amigo'}
+                      </button>
+                    )}
                   </section>
 
                   {visiblePosts.length === 0 ? (
                     <div className="empty-timeline-card">
                       <Icon name="swords" />
-                      <p className="empty-timeline">Nenhum desafio por aqui. Toque no raio para publicar o primeiro.</p>
+                      <p className="empty-timeline">
+                        {feedFilter === 'forme'
+                          ? 'Ninguém te desafiou ainda. Quando um amigo te marcar, o desafio aparece aqui.'
+                          : feedFilter === 'friends'
+                            ? 'Nada dos seus amigos por aqui. Adicione gente e publique só para eles.'
+                            : feedFilter === 'arena'
+                              ? 'Nenhum desafio público na arena no momento.'
+                              : 'Nenhum desafio por aqui. Toque no raio para publicar o primeiro.'}
+                      </p>
                     </div>
                   ) : (
                     visiblePosts.map(post => {
@@ -1340,11 +1560,18 @@ const handleRegister = async (e) => {
                             </div>
                           </div>
 
-                          {post.taggedUsers && post.taggedUsers.length > 0 && (
-                            <div className="post-tags">
-                              <strong>Com:</strong> {post.taggedUsers.map(u => u.name).join(', ')}
-                            </div>
-                          )}
+                          <div className="post-tags">
+                            <span className={`audience-badge audience-${post.audience || 'public'}`}>
+                              {(post.audience || 'public') === 'direct'
+                                ? 'Desafio direto'
+                                : post.audience === 'friends'
+                                  ? 'Só amigos'
+                                  : 'Arena pública'}
+                            </span>
+                            {post.taggedUsers && post.taggedUsers.length > 0 && (
+                              <span><strong>Com:</strong> {post.taggedUsers.map(u => u.name).join(', ')}</span>
+                            )}
+                          </div>
 
                           {post.text && <p className="post-text">{post.text}</p>}
 
@@ -1513,24 +1740,59 @@ const handleRegister = async (e) => {
                   </section>
 
                   <section className="create-block">
-                    <span className="block-label">Marcar amigos</span>
+                    <span className="block-label">Quem vê este desafio</span>
+                    <div className="audience-row">
+                      <button
+                        type="button"
+                        className={`chip ${postAudience === 'friends' && taggedUsers.length === 0 ? 'active' : ''}`}
+                        onClick={() => { setPostAudience('friends'); setTaggedUsers([]) }}
+                      >
+                        <Icon name="group" /> Só amigos
+                      </button>
+                      <button
+                        type="button"
+                        className={`chip ${postAudience === 'public' ? 'active' : ''}`}
+                        onClick={() => setPostAudience('public')}
+                      >
+                        <Icon name="public" /> Arena pública
+                      </button>
+                    </div>
+                    <p className="friends-hint">
+                      {taggedUsers.length > 0
+                        ? 'Desafio direto: só quem você marcar (e você) vai ver.'
+                        : postAudience === 'public'
+                          ? 'Todo mundo na arena vê este desafio.'
+                          : 'Só quem está na sua lista de amigos vê este desafio.'}
+                    </p>
+                  </section>
+
+                  <section className="create-block">
+                    <span className="block-label">Desafiar amigos</span>
                     <div className="tagged-users-list">
-                      {users.filter(u => u.email !== currentUser.email).map(u => (
+                      {users
+                        .filter(u => u.email !== currentUser.email && (friendEmails.has(u.email.toLowerCase()) || taggedUsers.includes(u.email)))
+                        .map(u => (
                         <label key={u.email} className={`tag-chip ${taggedUsers.includes(u.email) ? 'selected' : ''}`}>
                           <input
                             type="checkbox"
                             checked={taggedUsers.includes(u.email)}
                             onChange={(e) => {
-                              if (e.target.checked) setTaggedUsers(prev => [...prev, u.email])
-                              else setTaggedUsers(prev => prev.filter(email => email !== u.email))
+                              if (e.target.checked) {
+                                setTaggedUsers(prev => [...prev, u.email])
+                                setPostAudience('direct')
+                              } else {
+                                const next = taggedUsers.filter(email => email !== u.email)
+                                setTaggedUsers(next)
+                                if (next.length === 0 && postAudience === 'direct') setPostAudience('friends')
+                              }
                             }}
                           />
                           <UserAvatar user={u} size="avatar-sm" />
                           {u.name}
                         </label>
                       ))}
-                      {users.filter(u => u.email !== currentUser.email).length === 0 && (
-                        <small className="no-users-hint">Nenhum outro usuário cadastrado.</small>
+                      {friendsList.length === 0 && taggedUsers.length === 0 && (
+                        <small className="no-users-hint">Adicione amigos primeiro para desafiar alguém em específico.</small>
                       )}
                     </div>
                   </section>
@@ -1573,6 +1835,11 @@ const handleRegister = async (e) => {
                       <>
                         <h1>{currentUser.name}</h1>
                         <p>{currentUser.email}</p>
+                        {currentUser.id && (
+                          <button type="button" className="friend-id-chip" onClick={copyMyId}>
+                            ID: {String(currentUser.id)}
+                          </button>
+                        )}
                         <button type="button" className="btn-secondary" onClick={startEditProfile}>
                           <Icon name="edit" /> Editar perfil
                         </button>
@@ -1580,6 +1847,145 @@ const handleRegister = async (e) => {
                     )}
                   </div>
                   <button type="button" className="btn-primary btn-danger" onClick={handleLogout}>Sair</button>
+                </section>
+              )}
+
+              {currentView === 'friends' && (
+                <section className="friends-screen">
+                  <div className="friends-tabs" aria-label="Seções de amigos">
+                    <button type="button" className={`chip ${friendsTab === 'all' ? 'active' : ''}`} onClick={() => setFriendsTab('all')}>
+                      <Icon name="group" filled={friendsTab === 'all'} /> Todos ({friendsList.length})
+                    </button>
+                    <button type="button" className={`chip ${friendsTab === 'requests' ? 'active' : ''}`} onClick={() => { setFriendsTab('requests'); loadFriends(); }}>
+                      <Icon name="person_add" /> Solicitações
+                      {incomingRequests.length > 0 && <span className="tab-count">{incomingRequests.length}</span>}
+                    </button>
+                    <button type="button" className={`chip ${friendsTab === 'add' ? 'active' : ''}`} onClick={() => setFriendsTab('add')}>
+                      <Icon name="qr_code_2" /> Adicionar
+                    </button>
+                  </div>
+
+                  {friendsTab === 'all' && (
+                    <div className="friends-panel">
+                      <p className="friends-hint">Desafie um amigo, veja os posts dele ou remova da lista.</p>
+                      {friendsList.length === 0 ? (
+                        <div className="empty-timeline-card">
+                          <Icon name="group" />
+                          <p className="empty-timeline">Você ainda não tem amigos. Use Adicionar, o link ou o QR Code.</p>
+                        </div>
+                      ) : (
+                        friendsList.map(item => (
+                          <article key={item.id} className="friend-card">
+                            <UserAvatar user={item.user} />
+                            <div className="friend-info">
+                              <strong>{item.user.name}</strong>
+                              <span>ID: {item.user.id || '—'}</span>
+                            </div>
+                            <div className="friend-actions">
+                              <button type="button" className="btn-secondary" onClick={() => challengeFriend(item.user)}>Desafiar</button>
+                              <button type="button" className="btn-secondary" onClick={() => viewFriendPosts(item.user)}>Posts</button>
+                              <button type="button" className="btn-danger-text" onClick={() => removeFriendship(item.id)}>Remover</button>
+                            </div>
+                          </article>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {friendsTab === 'requests' && (
+                    <div className="friends-panel">
+                      <h2 className="friends-subtitle">Recebidas</h2>
+                      {incomingRequests.length === 0 ? (
+                        <p className="friends-hint">Nenhuma solicitação pendente.</p>
+                      ) : (
+                        incomingRequests.map(item => (
+                          <article key={item.id} className="friend-card">
+                            <UserAvatar user={item.user} />
+                            <div className="friend-info">
+                              <strong>{item.user.name}</strong>
+                              <span>Quer ser seu amigo</span>
+                            </div>
+                            <div className="friend-actions">
+                              <button type="button" className="btn-primary btn-compact" onClick={() => respondFriendRequest(item.id, 'accept')}>Aceitar</button>
+                              <button type="button" className="btn-danger-text" onClick={() => respondFriendRequest(item.id, 'reject')}>Recusar</button>
+                            </div>
+                          </article>
+                        ))
+                      )}
+
+                      <h2 className="friends-subtitle">Enviadas</h2>
+                      {outgoingRequests.length === 0 ? (
+                        <p className="friends-hint">Você não tem pedidos aguardando resposta.</p>
+                      ) : (
+                        outgoingRequests.map(item => (
+                          <article key={item.id} className="friend-card">
+                            <UserAvatar user={item.user} />
+                            <div className="friend-info">
+                              <strong>{item.user.name}</strong>
+                              <span>Aguardando resposta</span>
+                            </div>
+                            <button type="button" className="btn-danger-text" onClick={() => removeFriendship(item.id)}>Cancelar</button>
+                          </article>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {friendsTab === 'add' && (
+                    <div className="friends-panel">
+                      <section className="create-block">
+                        <span className="block-label">Seu ID</span>
+                        <p className="friends-hint">Os nomes podem se repetir. O ID é único e é o jeito certo de adicionar alguém.</p>
+                        <div className="arena-input">
+                          <Icon name="badge" />
+                          <input type="text" readOnly value={friendId} />
+                          <button type="button" className="icon-btn" onClick={copyMyId} aria-label="Copiar ID">
+                            <Icon name="content_copy" />
+                          </button>
+                        </div>
+                        <button type="button" className="btn-secondary" onClick={copyInvite}>
+                          <Icon name="link" /> Copiar link de convite
+                        </button>
+                        <button type="button" className="btn-secondary" onClick={() => setShowInviteQR(!showInviteQR)}>
+                          <Icon name="qr_code_2" /> {showInviteQR ? 'Ocultar QR Code' : 'Mostrar QR Code'}
+                        </button>
+                        {showInviteQR && inviteUrl && (
+                          <div className="qr-panel">
+                            {typeof QRCode === 'function' || QRCode?.$$typeof ? (
+                              <QRCode
+                                value={inviteUrl}
+                                size={180}
+                                style={{ width: 180, height: 180 }}
+                              />
+                            ) : (
+                              <p>QR indisponível. Use o link de convite.</p>
+                            )}
+                            <p>Aponte a câmera para<br />enviar solicitação</p>
+                          </div>
+                        )}
+                      </section>
+
+                      <form
+                        className="create-block"
+                        onSubmit={(e) => {
+                          e.preventDefault()
+                          sendFriendRequest(friendIdInput)
+                        }}
+                      >
+                        <span className="block-label">Adicionar por ID</span>
+                        <div className="arena-input">
+                          <Icon name="person_search" />
+                          <input
+                            type="text"
+                            placeholder="Cole o ID do amigo"
+                            value={friendIdInput}
+                            onChange={(e) => setFriendIdInput(e.target.value)}
+                          />
+                        </div>
+                        <button type="submit" className="btn-primary">Enviar solicitação</button>
+                      </form>
+                    </div>
+                  )}
                 </section>
               )}
             </main>
@@ -1594,9 +2000,14 @@ const handleRegister = async (e) => {
                   <Icon name="swords" filled={currentView === 'dashboard' || currentView === 'login'} />
                   <span>Arena</span>
                 </button>
-                <button type="button" className="nav-item" onClick={() => comingSoon('Amigos')}>
-                  <Icon name="group" />
+                <button
+                  type="button"
+                  className={`nav-item ${currentView === 'friends' ? 'active' : ''}`}
+                  onClick={() => openAppView('friends')}
+                >
+                  <Icon name="group" filled={currentView === 'friends'} />
                   <span>Amigos</span>
+                  {incomingRequests.length > 0 && <span className="nav-dot" />}
                 </button>
                 <button type="button" className="nav-item nav-fab-wrap" onClick={() => openAppView('create')} aria-label="Criar desafio">
                   <span className="nav-fab"><Icon name="bolt" filled /></span>
@@ -1697,6 +2108,10 @@ const handleRegister = async (e) => {
                         onClick={() => {
                           markSingleNotificationAsRead(notif)
                           setShowNotificationsModal(false)
+                          if (notif.type === 'friend_request') {
+                            openAppView('friends', 'requests')
+                            return
+                          }
                           setFeedFilter('all')
                         }}
                       >
@@ -1708,8 +2123,17 @@ const handleRegister = async (e) => {
                                 <Icon name="alternate_email" /> Marcado
                               </span>
                             )}
+                            {notif.type === 'friend_request' && (
+                              <span className="mention-badge">
+                                <Icon name="group" /> Amizade
+                              </span>
+                            )}
                             <strong>{notif.senderName}</strong>{' '}
-                            {notif.type === 'mention' ? notif.message.replace(/^.*?marcou/, 'marcou') : notif.message.replace(/^.*?publicou/, 'publicou')}
+                            {notif.type === 'friend_request'
+                              ? 'enviou uma solicitação de amizade.'
+                              : notif.type === 'mention'
+                                ? notif.message.replace(/^.*?marcou/, 'marcou')
+                                : notif.message.replace(/^.*?publicou/, 'publicou')}
                           </div>
                           {notif.postText && (
                             <p className="notification-preview">"{notif.postText}"</p>

@@ -2,7 +2,7 @@
 
 ## Descrição
 
-O Desafio X é uma rede social de desafios. O usuário cria uma conta, publica desafios com texto e mídia, responde no feed e marca outras pessoas.
+O Desafio X é uma rede social de desafios. O usuário cria uma conta, adiciona amigos, publica desafios com texto e mídia e responde no feed.
 
 O app funciona como PWA (híbrido). Dá para usar no navegador e também instalar pelo Chrome. Sem internet, os desafios ficam salvos no aparelho e são enviados quando a conexão volta.
 
@@ -45,6 +45,10 @@ O front abre em `http://localhost:5173` e a API em `http://localhost:3001`.
 - Toasts avisando conexão, salvamento offline e sync
 - QR Code para abrir/instalar o app
 - PWA com cache para uso offline
+- Amigos: adicionar por ID, link de convite ou QR Code
+- Solicitações de amizade (aceitar ou recusar)
+- Alcance do desafio: só amigos, desafio direto ou arena pública
+- Perfil com foto e edição de nome
 
 ## Matriz de Funcionalidades:
 
@@ -87,6 +91,18 @@ O front abre em `http://localhost:5173` e a API em `http://localhost:3001`.
       <td>✔</td>
       <td>✔</td>
       <td>localStorage + PWA</td>
+    </tr>
+    <tr>
+      <td>amigos / convite / QR</td>
+      <td>✔</td>
+      <td>✔</td>
+      <td>React + API</td>
+    </tr>
+    <tr>
+      <td>desafio só para amigos</td>
+      <td>✔</td>
+      <td>✔</td>
+      <td>React + API</td>
     </tr>
   </tbody>
 </table>
@@ -139,19 +155,23 @@ O front abre em `http://localhost:5173` e a API em `http://localhost:3001`.
       <td>Sim</td>
       <td>Não</td>
     </tr>
+    <tr>
+      <td>amigos</td>
+      <td>Sim</td>
+      <td>Sim</td>
+      <td>Sim</td>
+      <td>Não</td>
+    </tr>
   </tbody>
 </table>
 
 ## Proposta de evolução
 
-1. Empacotar o PWA em APK para instalar direto no Android.
-2. Melhorar o perfil do usuário.
-3. Sistema de progresso e XP.
-4. Dividir codigo da aplicação em modulos.
-5. Unificar a configuração dos estilos e temas aplicados.
+1. Parties / grupos.
+2. Sistema de progresso e XP.
+3. Dividir codigo da aplicação em modulos.
 
 ## Funcionalidades a serem desenvolvidas
 
-* Gerar APK instalável
-* Personalizar o perfil do usuário
+* Parties / grupos
 * Sistema de Progresso e XP
